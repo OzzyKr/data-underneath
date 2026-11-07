@@ -19,9 +19,11 @@ def trim_borders(arr, margin=3):
 
 def row_background(rgb, ink):
     """Mean colour of each row, ignoring the black pattern lines."""
+    import warnings
     bg = np.where(ink[..., None], np.nan, rgb)
-    with np.errstate(invalid="ignore"):
-        out = np.nanmean(bg, axis=1)          # (H, 3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        out = np.nanmean(bg, axis=1)          # (H, 3); fully-black rows -> nan
     return np.nan_to_num(out, nan=0.0)
 
 
