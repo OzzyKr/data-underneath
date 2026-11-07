@@ -91,6 +91,8 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     W, H = img.size
     ys = np.linspace(0, H - 1, min(cfg.body_samples, H)).astype(int)
     dark = _ink(_rows(img, ys)) < 150
+    shift = estimate_skew(dark, ys, W)
+    dark = deskew_rows(dark, ys, shift)
     n = len(ys)
     inner = (np.arange(W) > 0.015 * W) & (np.arange(W) < 0.985 * W)
     # 1. columns dark over a large part of the page are rule candidates; the rows where most of them are dark are
@@ -127,7 +129,8 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
         return int(0.1 * H), H, xs
     a, b = long_runs[0][0], long_runs[-1][1] - 1
     top, bot = int(ys[a]), int(min(H, ys[b] + 1))
-    # header bottom rule: lowest near-full-width dark row in the first inches of the structure
+    # header bottom rule: lowest near-full-width dark row in the first inches of the structure. (A mirrored snap at
+    # the bottom, onto a repeated footer header, was tried and removed: lone depth grid lines fooled it.)
     xa, xb = int(xs.min()), int(xs.max()) + 1
     win_h = int(min(bot - top, cfg.header_search_in * dpi))
     if win_h > 10:
@@ -136,6 +139,47 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
         if len(cand):
             top = top + int(cand[-1]) + 1
     return top, bot, xs
+
+
+def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 8) -> tuple[float, float]:
+    """Horizontal drift of the vertical rules down the page (scan skew), as x_shift(y) = a*y + b relative to the
+    page middle: each band's dark-column profile is cross-correlated with the middle band's."""
+    n = len(ys)
+    if n < 4 * n_bands:
+        return 0.0, 0.0
+    # only the lower 60% of the page (always log body; the header's structure differs and spoils the fit)
+    edges = np.linspace(int(0.4 * n), n, n_bands + 1).astype(int)
+    prof = [dark[a:b].mean(axis=0).astype(np.float32) for a, b in zip(edges[:-1], edges[1:], strict=False)]
+    ref = prof[n_bands // 2] - prof[n_bands // 2].mean()  # middle of the analysed part
+    if ref.std() < 1e-3:
+        return 0.0, 0.0
+    maxs = max(4, int(0.03 * W))
+    yc, sh = [], []
+    for (a, b), p in zip(zip(edges[:-1], edges[1:], strict=False), prof, strict=False):
+        q = p - p.mean()
+        if q.std() < 1e-3:
+            continue
+        cc = [float(np.dot(np.roll(q, -k), ref)) for k in range(-maxs, maxs + 1)]
+        yc.append(float(ys[(a + b) // 2]))
+        sh.append(float(np.argmax(cc) - maxs))
+    if len(sh) < 3:
+        return 0.0, 0.0
+    a, b = np.polyfit(yc, sh, 1)
+    resid = np.abs(np.polyval([a, b], yc) - np.array(sh))
+    if np.median(resid) > 3:  # inconsistent shifts: not a clean skew, leave the rows alone
+        return 0.0, 0.0
+    return float(a), float(b)
+
+
+def deskew_rows(dark: np.ndarray, ys: np.ndarray, skew: tuple[float, float]) -> np.ndarray:
+    """Shift each sampled row back by the estimated drift (no-op when the drift is under 3 px over the page)."""
+    a, b = skew
+    if abs(a) * (ys[-1] - ys[0]) < 3:
+        return dark
+    out = np.empty_like(dark)
+    for i, y in enumerate(ys):
+        out[i] = np.roll(dark[i], -int(round(a * y + b)))
+    return out
 
 
 def vertical_edges(rows_rgb: np.ndarray, dpi: float) -> tuple[list[int], np.ndarray, list[tuple[int, int]]]:
@@ -191,13 +235,23 @@ def _ocr_numbers(arr: np.ndarray, rot: int) -> list[tuple[float, float, float, f
     return out
 
 
-def number_tokens(img: Image.Image, top: int, bot: int, dpi: float, cfg: LayoutConfig) -> list[tuple]:
+def number_tokens(
+    img: Image.Image,
+    top: int,
+    bot: int,
+    dpi: float,
+    cfg: LayoutConfig,
+    fracs: np.ndarray | None = None,
+    band_in: float | None = None,
+    rots: list[int] | None = None,
+) -> list[tuple]:
     W = img.size[0]
-    bh = int(cfg.depth_band_in * dpi)
+    bh = int((band_in or cfg.depth_band_in) * dpi)
     sc = 0.5 if dpi >= 300 else 1.0
-    rots = [0, 90, 270]
+    rots = list(rots) if rots else [0, 90, 270]
     toks = []
-    for i, f in enumerate(np.linspace(0.12, 0.88, cfg.depth_bands)):
+    fracs = np.linspace(0.12, 0.88, cfg.depth_bands) if fracs is None else fracs
+    for i, f in enumerate(fracs):
         yc = int(top + f * (bot - top))
         a, b = max(top, yc - bh // 2), min(bot, yc + bh // 2)
         if b - a < 20:
@@ -636,11 +690,20 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     # depth
     toks = number_tokens(img, top, bot, dpi, cfg)
     dcs = depth_candidates(toks, edges, dark, dpi, cfg, top, bot, W)
+    if not dcs or dcs[0]["regular_only"] or dcs[0]["inliers"] < 4:
+        # labels can be further apart than a band is tall (5 in/100 ft logs): read taller, interleaved bands too
+        extra = np.linspace(0.12, 0.88, cfg.depth_bands) + 0.38 / max(1, cfg.depth_bands - 1)
+        toks += number_tokens(img, top, bot, dpi, cfg, fracs=np.clip(extra, 0.05, 0.95), band_in=2 * cfg.depth_band_in)
+        dcs = depth_candidates(toks, edges, dark, dpi, cfg, top, bot, W)
+        diag["depth_second_pass"] = True
     diag["depth"] = [{k: v for k, v in d.items()} for d in dcs[:3]]
     diag["depth_all"] = [list(d["box"]) for d in dcs[:10]]
     if dcs:
         depth = dcs[0]["box"]
-        d_conf = float(min(1.0, dcs[0]["inliers"] / 8.0) * (0.6 if dcs[0]["regular_only"] else 1.0))
+        # share of the cluster's labels on one line is the strongest single cue (dev AUROC 0.90)
+        d0 = dcs[0]
+        frac = d0["inliers"] / max(1, d0["n"])
+        d_conf = float(np.clip(frac * min(1.0, d0["inliers"] / 6.0), 0, 1) * (0.7 if d0["regular_only"] else 1.0))
     else:
         depth, d_conf = (0, top, max(1, int(0.05 * W)), bot), 0.0
 
@@ -671,8 +734,8 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     diag["legend_all"] = [list(c) for _, _, c in scored[:10]]
     if scored:
         legend = scored[0][2]
-        margin = scored[0][0] - (scored[1][0] if len(scored) > 1 else 0.0)
-        l_conf = float(np.clip(0.3 + margin, 0.0, 1.0))
+        f0 = scored[0][1]  # a pure rock-word frame (little other text, not a page-sized band) is a real legend
+        l_conf = float(np.clip(0.25 + 1.5 * f0["purity"] - f0["non"] - 0.5 * f0["area"], 0.0, 1.0))
     else:
         legend, l_conf = (0, 0, W, max(1, min(top, H))), 0.0
 
@@ -680,17 +743,23 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     anchors = lith_anchors(img, top, dpi, words)
     diag["anchors"] = [[round(x), round(wd)] for x, wd in anchors]
     palette = legend_palette(img, legend) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
-    lcs = lith_candidates(rows, edges, dark, dpi, cfg, palette, anchors, rules)
+    bw_page = img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))
+    lrows = rows
+    if bw_page:  # hatching skips rows: measure texture on thin bands (darkest pixel over ~0.03 in of rows)
+        band = max(2, int(0.03 * dpi))
+        ys = np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top) - band, 300).astype(int)
+        lrows = np.stack([_rows(img, np.arange(y, y + band)).min(axis=0) for y in ys])
+    lcs = lith_candidates(lrows, edges, dark, dpi, cfg, palette, anchors, rules)
     if dcs:  # never let a depth candidate's labels sit inside a lithology candidate
         lx = dcs[0]["labels"]
         lcs = [c for c in lcs if min(c["x1"], lx[1]) - max(c["x0"], lx[0]) <= 2]
-    bw = img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))
+    bw = bw_page
     diag["bw"] = bool(bw)
     if bw:  # colour cues are constant on black-and-white pages: judge the hatch texture instead
         # single sampled rows often fall in the white gap between hatch rows, so the fill gate is loose and the
         # decisive cue is "the same texture across the width" (a cuttings track has two patterns side by side)
         gated = [c for c in lcs if c["tex_fill"] >= 0.15]
-        cues = {"lr": -1.5, "tex_fill": 1.0, "spread": 0.5, "contrast": 0.5}
+        cues = {"lr": -2.0, "spread": 0.5, "contrast": 0.5}  # texture fill only gates: dotted grid tracks fill too
     else:
         gated = [c for c in lcs if c["distinct"] <= 1.3 and c["fill"] >= 0.3 and (not len(palette) or c["cov"] >= 0.4)]
         cues = {"fill": 1.0, "homog": 1.0, "distinct": -1.0, "runs": -1.0, "spread": 1.0, "contrast": 0.5}
@@ -704,8 +773,12 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         pool.sort(key=lambda c: -c["score"])
         best = pool[0]
         lith = (best["x0"], top, best["x1"], bot)
+        # a "Lithology" header over the pick is the strongest cue (dev AUROC 0.81); then a clear margin and, on colour
+        # pages, one colour class per row
         margin = best["score"] - (pool[1]["score"] if len(pool) > 1 else 0.0)
-        li_conf = float(np.clip(0.3 + 0.15 * margin, 0.0, 1.0)) * (1.0 if gated else 0.5)
+        one_class = 1.0 if (bw or best["distinct"] <= 1.15) else 0.0
+        li_conf = 0.3 + 0.35 * best["header"] + 0.2 * float(np.clip(margin / 3.0, 0, 1)) + 0.15 * one_class
+        li_conf = float(np.clip(li_conf, 0.0, 1.0)) * (1.0 if gated else 0.5)
         diag["lith"] = [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items()} for c in pool[:3]]
         diag["lith_all"] = [[c["x0"], top, c["x1"], bot] for c in pool[:10]]
     else:
