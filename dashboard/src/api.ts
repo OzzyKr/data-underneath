@@ -23,6 +23,7 @@ export type Tiles = {
   tile_h: number;
   n: number;
   legend: { box: number[]; w: number; h: number } | null;
+  col?: { box: [number, number, number, number]; scale: number; w: number; h: number; tile_h: number; n: number };
 };
 
 export type Boxes = {

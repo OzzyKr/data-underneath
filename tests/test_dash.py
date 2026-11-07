@@ -102,6 +102,9 @@ def test_api_serves_the_log_and_its_exact_csv(client, dash_repo):
     lid = logs[0]["log_id"]
     detail = client.get(f"/api/logs/{lid}").json()
     assert detail["tiles"]["n"] >= 1 and detail["boxes"]["interpreted_lithology_column"]
+    col = detail["tiles"]["col"]
+    assert col["n"] >= 1 and col["box"][1] == detail["boxes"]["interpreted_lithology_column"][1]
+    assert client.get(f"/tiles/{lid}/c0000.webp").status_code == 200
     assert {r["rock"] for r in detail["rocks"]} >= {"Shale", "Sandstone"}
     assert any(e["used"] and e["swatch_url"] for e in detail["legend"])
     rows = client.get(f"/api/logs/{lid}/intervals").json()

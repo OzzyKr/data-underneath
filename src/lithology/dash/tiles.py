@@ -1,8 +1,12 @@
 """Cut each scan into small web tiles for the Image view.
 
-The view spans the depth column to the lithology column with the same margins as the annotated PNG
-(``render.render_annotated``), shrunk to at most ``max_width`` px wide and sliced into ``tile_h``-px WebP tiles, so
-a 313,800 px scan scrolls smoothly. The legend and each legend swatch are saved alongside for the legend panel.
+Two tile sets per scan, both sliced into ``tile_h``-px WebP tiles so a 313,800 px scan scrolls smoothly:
+
+* ``c*.webp`` - the lithology column alone, at full resolution: the main track of the Image view;
+* ``t*.webp`` - the wider context (depth column to lithology column, same margins as ``render.render_annotated``),
+  shrunk to at most ``max_width`` px wide: the optional "full scan" track.
+
+The legend and each legend swatch are saved alongside for the legend panel.
 """
 
 from __future__ import annotations
@@ -33,6 +37,29 @@ def _mode(img: Image.Image) -> str:
     return "L" if img.mode in ("1", "L", "I;16", "I") else "RGB"
 
 
+def _column_tiles(
+    img: Image.Image, boxes: DocumentBoxes, out_dir: Path, mode: str, *, tile_h: int, quality: int, max_width: int = 360
+) -> dict[str, Any]:
+    """The lithology column with a thin margin, at full resolution (narrow, so cheap)."""
+    W, H = img.size
+    lc = boxes.lithology_column.clip(W, H)
+    pad = max(2, round(lc.width * 0.04))
+    box = Box(max(0, lc.x0 - pad), lc.y0, min(W, lc.x1 + pad), lc.y1)
+    scale = min(1.0, max_width / box.width)
+    out_w = max(1, round(box.width * scale))
+    out_h = max(1, round(box.height * scale))
+    n = (out_h + tile_h - 1) // tile_h
+    for k in range(n):
+        ty0, ty1 = k * tile_h, min(out_h, (k + 1) * tile_h)
+        sy0 = box.y0 + int(ty0 / scale)
+        sy1 = min(box.y1, box.y0 + int(round(ty1 / scale)))
+        part = img.crop((box.x0, sy0, box.x1, max(sy1, sy0 + 1))).convert(mode)
+        if scale < 1 or part.height != ty1 - ty0:
+            part = part.resize((out_w, ty1 - ty0), Image.Resampling.LANCZOS)
+        part.save(out_dir / f"c{k:04d}.webp", "WEBP", quality=quality, method=4)
+    return {"box": list(box.as_tuple()), "scale": scale, "w": out_w, "h": out_h, "tile_h": tile_h, "n": n}
+
+
 def build_tiles(
     image_path: Path,
     boxes: DocumentBoxes,
@@ -61,6 +88,8 @@ def build_tiles(
         part = part.resize((out_w, ty1 - ty0), Image.Resampling.LANCZOS if scale < 1 else Image.Resampling.NEAREST)
         part.save(out_dir / f"t{k:04d}.webp", "WEBP", quality=quality, method=4)
 
+    column = _column_tiles(img, boxes, out_dir, mode, tile_h=tile_h, quality=quality)
+
     legend_meta = None
     lg = boxes.legend.clip(W, H)
     if lg.width > 2 and lg.height > 2:
@@ -88,6 +117,7 @@ def build_tiles(
         "tile_h": tile_h,
         "n": n,
         "legend": legend_meta,
+        "col": column,
     }
     (out_dir / "meta.json").write_text(json.dumps(meta))
     return meta
