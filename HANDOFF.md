@@ -48,4 +48,13 @@ When done: `lith labels-import` then `lith eval --pred out --labels labels --spl
 1. Import labels, score dev; tune abstain on/off, thin-bed min 0.5 vs 1 ft, naming thresholds.
 2. Bonus: detect the 3 boxes (use `lithology_track_label` header text in 24 JSONs; score IoU vs 51 boxes).
 3. Cut peak memory; freeze (score holdout once, tag `v1.0`); run test images unchanged.
-4. Stage 2 (G-Research "Use hidden data, make it visible"): React + FastAPI + DuckDB dashboard.
+4. Stage 2 dashboard is built (see "Dashboard" below): add an AI key to `.env`, rehearse, then `make dash-demo`.
+
+## Dashboard (Stage 2)
+- `make dash-data` then `make dash` -> http://127.0.0.1:8000. Pages: CSV, Image (scan tiles + overlay), Insights
+  (fixed-SQL charts, AI notes, Ask the data with visible SQL), Run a scan (live pipeline run, ~9 s for log06).
+- Back end `src/lithology/dash/` (store/tiles/insights/ai/jobs/app), front end `dashboard/` (Vite + React + Tailwind).
+- Holdout logs are hidden unless `lith dash-build --all` (`make dash-demo`) - only for the final demo.
+- AI provider switch: `.env` (`.env.example`); offline mode serves cached notes/answers - ask the demo questions
+  once with a key before the demo so they work offline too.
+- Rock colours: the legend's hue snapped to a colour-blind-validated palette; Unresolved is hatched grey.

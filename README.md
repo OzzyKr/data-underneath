@@ -43,6 +43,25 @@ regression test runs against `example/example.csv`.
 | `diagnostics/<doc>.csv` | Same rows plus `confidence` and `notes` (failed physical checks) |
 | `<doc>.png` | Annotated lithology column: intervals, boundary depths, labels, colour key |
 | `run_summary.csv`, `run_meta.json` | Per-document runtime, peak memory, warnings; commit and config hash |
+| `diagnostics/<doc>_naming.json`, `_legend.json` | Naming opinions per rock group; legend entries with swatch colours |
+
+## Dashboard (Stage 2)
+
+A local web app over the pipeline's outputs: **CSV** (the submission CSV, row by row), **Image** (the scan with
+the predicted beds drawn on it, linked to the CSV) and **Insights** (all logs as one dataset, with an AI that
+answers questions by writing read-only SQL). A scan can also be dropped in and run live.
+
+```bash
+make run          # pipeline -> out/ (once)
+make dash-data    # out/ -> dashboard/.cache (DuckDB + scan tiles; holdout logs hidden)
+make dash         # build the front end, serve http://127.0.0.1:8000 and open it
+# final demo only: make dash-demo   (includes the holdout logs)
+```
+
+AI: copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY` (Claude, default `claude-opus-5-5`), or
+`OPENAI_API_KEY` + `OPENAI_MODEL` (+ `OPENAI_BASE_URL` for any OpenAI-compatible endpoint). Without a key the
+Insights page works offline: charts and computed summaries always, AI notes and answers from the cache of earlier
+runs. Front-end development: `lith dash --dev` (API with reload) plus `cd dashboard && npm run dev` (port 5173).
 
 ## How it works
 

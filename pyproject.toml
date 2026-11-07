@@ -28,7 +28,7 @@ api = [
   "anthropic>=2.6", "openai>=1.90",
 ]
 ai = ["torch>=2.4", "torchvision>=0.19"]  # tier 2 second opinion; without it the pipeline runs classical-only
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27"]
 
 [project.scripts]
 lith = "lithology.cli:main"

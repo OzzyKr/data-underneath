@@ -1,0 +1,72 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* Graphite surfaces, one Viridien-violet accent (approved mock, a touch brighter). */
+@theme {
+  --color-bg: #121419;
+  --color-nav: #0e1014;
+  --color-panel: #171a20;
+  --color-panel-2: #1c2027;
+  --color-hover: #1e232b;
+  --color-line: #232830;
+  --color-line-2: #2e343e;
+  --color-ink: #eceef1;
+  --color-muted: #a3acb6;
+  --color-faint: #7c8591;
+  --color-accent: #5b14d0;
+  --color-accent-hi: #6b2ae0;
+  --color-select: #8f74ea;
+  --color-rose: #e39ab0;
+  --color-paper: #fbfbf9;
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-select);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Unresolved beds: neutral fill plus a texture, so they never rely on colour alone. */
+.hatch {
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0 2px, transparent 2px 6px);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2e343e transparent;
+}
+
+@keyframes du-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse {
+  animation: du-pulse 1.2s ease-in-out infinite;
+}

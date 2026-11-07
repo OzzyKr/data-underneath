@@ -38,8 +38,7 @@ def test_log_colours_follow_the_legend_but_stay_distinct():
     c = log_colours([("Clay-S", (0, 255, 0), 255.0), ("Clay-M", (0, 255, 0), 255.0), ("Shale", (255, 255, 255), 0.0)])
     assert c["Clay-S"] != c["Clay-M"]  # same legend green, still told apart
     assert c["Shale"] == FAMILY_COLOURS["Shale"]  # black-and-white swatch: family colour
-    r, g, b = (int(c["Clay-S"][i : i + 2], 16) for i in (1, 3, 5))
-    assert g > r and g > b and max(r, g, b) - min(r, g, b) < 140  # green, but muted
+    assert c["Clay-S"] == FAMILY_COLOURS["Clay"]  # the legend's green snaps to the validated green
 
 
 @pytest.mark.parametrize(

@@ -18,7 +18,7 @@ from typing import Any
 import duckdb
 
 from lithology.dash.ai import AIError, Provider
-from lithology.dash.rocks import FAMILY_COLOURS, FAMILY_ORDER
+from lithology.dash.rocks import CHART_FAMILIES, FAMILY_COLOURS, FOLD_TO_OTHER
 
 SUGGESTED = [
     "Which well has the most sand below 10,000 ft?",
@@ -71,19 +71,30 @@ def rock_mix(con: duckdb.DuckDBPyConnection, limit: int = 10) -> list[dict[str, 
                WHERE log_id = ? AND thickness_ft > 0 GROUP BY 1""",
             [w["log_id"]],
         )
-        total = sum(p["ft"] for p in parts) or 1.0
-        shares = sorted(
-            ({"family": p["family"], "share": p["ft"] / total, "ft": p["ft"]} for p in parts),
-            key=lambda s: FAMILY_ORDER.index(s["family"]) if s["family"] in FAMILY_ORDER else 99,
-        )
+        ft: dict[str, float] = {}
+        for p in parts:
+            fam = chart_family(p["family"])
+            ft[fam] = ft.get(fam, 0.0) + p["ft"]
+        total = sum(ft.values()) or 1.0
+        shares = [{"family": f, "share": ft[f] / total, "ft": ft[f]} for f in CHART_FAMILIES if f in ft]
         out.append(
             {"log_id": w["log_id"], "well": w["well_group"], "title": w["title"], "feet": w["feet"], "shares": shares}
         )
     return out
 
 
+def chart_family(family: str) -> str:
+    return "Other" if family in FOLD_TO_OTHER else family
+
+
 def correlation_candidates(con: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
-    return _one_log_per_well(con)
+    """One log per well, best first: most feet the pipeline named with confidence (not Unresolved)."""
+    named = dict(
+        con.execute(
+            "SELECT log_id, sum(thickness_ft) FROM intervals WHERE NOT unresolved AND thickness_ft > 0 GROUP BY 1"
+        ).fetchall()
+    )
+    return sorted(_one_log_per_well(con), key=lambda w: -(named.get(w["log_id"]) or 0))
 
 
 def correlation(con: duckdb.DuckDBPyConnection, log_ids: list[str] | None = None) -> dict[str, Any]:
@@ -100,6 +111,7 @@ def correlation(con: duckdb.DuckDBPyConnection, log_ids: list[str] | None = None
         )
         runs: list[dict[str, Any]] = []
         for r in rows:  # merge touching beds of one family: fewer shapes, same picture
+            r["family"] = chart_family(r["family"])
             if runs and runs[-1]["family"] == r["family"] and abs(runs[-1]["bottom"] - r["top"]) < 1.0:
                 runs[-1]["bottom"] = r["bottom"]
             else:
@@ -112,7 +124,7 @@ def correlation(con: duckdb.DuckDBPyConnection, log_ids: list[str] | None = None
 
 
 def families() -> list[dict[str, str]]:
-    return [{"family": f, "color": FAMILY_COLOURS[f]} for f in FAMILY_ORDER]
+    return [{"family": f, "color": FAMILY_COLOURS[f]} for f in CHART_FAMILIES]
 
 
 # ------------------------------------------------------------------------------------------------ notes
