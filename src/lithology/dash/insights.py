@@ -18,11 +18,13 @@ from typing import Any
 import duckdb
 
 from lithology.dash.ai import AIError, Provider
+from lithology.dash.derived import salt_table, wells_table
 from lithology.dash.rocks import CHART_FAMILIES, FAMILY_COLOURS, FOLD_TO_OTHER
 
 SUGGESTED = [
     "Which well has the most sand below 10,000 ft?",
     "Where is the salt thickest?",
+    "Where does the salt end in each well, and what lies below it?",
     "Which logs did the pipeline find hardest to name?",
 ]
 
@@ -266,8 +268,10 @@ def snapshot(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
         "lithology, rock, rock_family, unresolved, confidence, notes FROM intervals",
         "legend": "SELECT log_id, label, is_rock, used, beds, cluster_id FROM legend",
     }
-    for name, q in queries.items():
-        df = con.execute(q).df()
+    frames = {name: con.execute(q).df() for name, q in queries.items()}
+    frames["wells"] = wells_table(frames["logs"])
+    frames["salt"] = salt_table(frames["logs"], frames["intervals"])
+    for name, df in frames.items():
         mem.register("_src", df)
         mem.execute(f"CREATE TABLE {name} AS SELECT * FROM _src")
         mem.unregister("_src")
@@ -319,12 +323,25 @@ intervals: one row per bed (interval) in a log.
   Unresolved), unresolved (boolean), confidence (0-1), notes.
 legend: one row per legend entry read from a log.
   log_id, label, is_rock, used (appears in the log's beds), beds, cluster_id.
+wells: one row per well. Use it to find a well by any of its names (a well's logs can have other titles, e.g. well
+  'G16786' also has logs titled 'MDN-1 ...'; search other_names with ILIKE) and to count wells.
+  well (= logs.well_group), other_names, n_logs, log_titles, depth_refs, top_ft, bottom_ft, kind.
+salt: one row per log that crosses a salt body of 100 ft or more, already computed from the beds. ALWAYS use this
+  table for questions about salt (where it starts or ends, how thick, what lies below) instead of summing salt beds.
+  well, log_title, depth_ref ('MD' measured along the hole or 'TVD' true vertical depth - several logs of one well
+  can differ only by this), salt_top_ft, top_seen (FALSE = the log starts inside the salt, so salt_top_ft is only
+  where the log begins and the real top is higher: say "at least" for the thickness and never call it the top of
+  salt), salt_base_ft (base of the main salt body = "where the salt ends"), body_thickness_ft (base - top, inclusions
+  included), salt_in_body_ft (salt only), mixed_zone_base_ft and mixed_zone_salt_ft (thin salt beds within 500 ft
+  below the base: a mixed zone, not the main salt; NULL if none), sand_below_base_ft, thickest_sand_below_ft,
+  log_top_ft, log_bottom_ft, n_salt_bodies, main_log (TRUE for one log per well).
+  For one answer per well, filter main_log = TRUE.
 
 How to work:
 - Get every number from run_sql. Never invent or estimate numbers.
 - Only SELECT queries. Aggregate and keep results small (LIMIT 50 or fewer rows).
 - Compare rocks across logs with rock_family; sum thickness_ft for "how much"; count rows for "how many beds".
-- Name logs by title and wells by well_group.
+- Name logs by title and wells by well_group. Never list the same well twice in one answer or chart.
 - When you have the answer, call show_answer exactly once. Its text is 1-4 plain sentences with exact numbers and
   units. Mention uncertainty when it matters (for example a large unresolved share or low confidence). Add a chart
   only when it helps, built from the columns of your last query.
