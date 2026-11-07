@@ -1,4 +1,5 @@
 # Hand labels live next to this file as <doc_id>.csv, in the organisers' example.csv format.
 # Each labelled document is either "dev" (used while tuning) or "holdout" (scored once, at the freeze).
 # Pick holdout documents from different families (see lithology.io.family_of) than the dev ones.
-split: {}
+split:
+  0000000009_d-582_0000020435-0001_log06_fe_5in_md: dev
