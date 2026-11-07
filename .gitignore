@@ -27,6 +27,8 @@ node_modules/
 dashboard/dist/
 dashboard/.cache/
 out_live/
+out_prev/
+out_runlogs/
 
 # Generated pictures are rebuilt with `lith labels-make`; the CSVs are the labels.
 labels/kit/*.png

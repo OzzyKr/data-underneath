@@ -42,7 +42,9 @@ legend:
   ocr_min_conf: 30
 
 naming:
-  abstain: true                    # true: write unresolved_label; false: write the best guess (still flagged)
+  abstain: false                   # true: write unresolved_label; false: write the best guess, flagged with a low
+                                   # confidence and a "could not differentiate: A or B?" note (Unresolved always
+                                   # scores as wrong when teams are ranked on correctness)
   unresolved_label: Unresolved     # CSV name for groups computer vision cannot tell apart
   classical_decisive_margin: 1.0   # runner-up must be this much further away (fixed-scale distance units)
   pretrained_decisive_margin: 0.07 # winner's cosine similarity must beat the runner-up by this much
@@ -50,7 +52,14 @@ naming:
   template_decisive_margin: 0.05   # ...when it also beats the runner-up by this much
   confidence_agree: 0.9
   confidence_one_sure: 0.6
-  confidence_unresolved: 0.2
+  confidence_unresolved: 0.2      # a best guess between candidates computer vision could not separate
+  confidence_lookalike: 0.4        # a guess settled by a look-alike rule (plainest variant, or the commoner rock)
+  # Tie-break between legend entries drawn pixel-identically (e.g. Clay and Shale in some b&w legends): the picture
+  # cannot decide, so the more common rock in mud logs is written. An explicit prior, named in the bed's note.
+  common_rocks: [shale, sandstone, limestone, siltstone, claystone, dolomite, marl, anhydrite, halite, chalk, coal]
+  colour_gate: 12.0                # a best guess must have the bed's fill colour (Lab distance) when any swatch does
+  use_strokes: true                # stroke-shape opinion (scale-invariant; from a teammate's prototype) joins the
+                                   # best-guess vote for groups no opinion settled
 
 checks:
   min_thickness_ft: 0.5      # beds thinner than this get lower confidence

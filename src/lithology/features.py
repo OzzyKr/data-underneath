@@ -230,3 +230,46 @@ class FeatureScaler:
 
 # Smallest meaningful difference per feature (Lab units ~ just-noticeable colour difference; fractions).
 DEFAULT_FLOOR = np.array([2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 0.01, 0.03, 0.03, 0.03, 0.01, 0.01])
+
+
+# ------------------------------------------------------------------------------- stroke-shape descriptor
+# Ported from a teammate's prototype (depth-pipeline branch, src/match.py, J. Ouazzani). A pattern is described by
+# the *shapes* of its marks, not their size or spacing: the share of dashes (wide marks), vertical bars and dots among
+# its connected ink components, its anisotropy, ink density and long horizontal rules, plus the fill colour. A column
+# that draws the legend's pattern denser or smaller (common on black-and-white logs) keeps the same description.
+
+STROKE_WEIGHTS = np.array([0.5, 2.0, 2.0, 2.0, 0.2, 1.0])  # anisotropy, dash, dot, vertical, log ink, long rules
+STROKE_COLOUR_WEIGHT = 6.0  # fill colour (0-1 RGB) difference counts this much
+
+
+def stroke_descriptor(rgb: np.ndarray, ink_luma: int = 110) -> np.ndarray:
+    """9 numbers: 6 stroke-shape statistics then the fill colour (0-1 RGB) of the non-ink pixels."""
+    import cv2
+
+    px = rgb.astype(np.float32)
+    luma = px @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    sat = (px.max(axis=2) - px.min(axis=2)) / 255
+    ink = (luma < ink_luma) & (sat < 0.25)  # black pattern lines, not dark colour fills
+    h, w = ink.shape
+    rs, cs, fr = float(ink.mean(axis=1).std()), float(ink.mean(axis=0).std()), float(ink.mean())
+    _, _, st, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8), connectivity=8)
+    st = st[1:]
+    st = st[st[:, 4] >= 3]
+    if len(st):
+        st = st[st[:, 4] >= 0.2 * np.median(st[:, 4])]  # ignore specks
+        la = np.log((st[:, 2] + 1) / (st[:, 3] + 1))
+        dash, vert = float((la > 0.7).mean()), float((la < -0.7).mean())
+        dot = 1.0 - dash - vert
+        longh = float((st[:, 2] > 0.6 * w).mean())
+    else:
+        dash = dot = vert = longh = 0.0
+    paper = px[~ink] if (~ink).sum() >= max(4, ink.size // 20) else px.reshape(-1, 3)
+    colour = paper.reshape(-1, 3).mean(axis=0) / 255
+    return np.array([np.log((rs + 0.01) / (cs + 0.01)), dash, dot, vert, np.log(fr + 0.005), longh, *colour])
+
+
+def stroke_distances(cluster_desc: np.ndarray, swatch_desc: np.ndarray) -> np.ndarray:
+    """Distance (clusters x swatches) between stroke descriptors; lower = more alike."""
+    t = (cluster_desc[:, None, :6] - swatch_desc[None, :, :6]) * STROKE_WEIGHTS
+    c = cluster_desc[:, None, 6:] - swatch_desc[None, :, 6:]
+    return np.linalg.norm(t, axis=2) + STROKE_COLOUR_WEIGHT * np.linalg.norm(c, axis=2)

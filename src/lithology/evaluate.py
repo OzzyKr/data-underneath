@@ -201,7 +201,9 @@ def score_audit(pred_rows: list[dict[str, str]], audit_rows: list[dict[str, str]
             ov = min(y1, int(float(p["bottom_y"]))) - max(y0, int(float(p["top_y"])))
             if ov > 0:
                 cover[p["lithology"]] += ov
-                flag = normalise_name(p["lithology"]) == "unresolved" or FLAG_NOTE in (p.get("notes") or "")
+                st = p.get("status")
+                legacy = normalise_name(p["lithology"]) == "unresolved" or FLAG_NOTE in (p.get("notes") or "")
+                flag = (st != "named") if st else legacy
                 info[p["lithology"]] = (float(p.get("confidence") or 0), flag)
         n += 1
         if not cover:

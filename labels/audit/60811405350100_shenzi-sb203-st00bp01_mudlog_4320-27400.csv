@@ -1,0 +1,13 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+7038.31,7069.65,Siltstone,10570,10664,shenzi#1,claude-vision
+9148.37,9157.04,Limestone,16901,16927,shenzi#2,claude-vision
+9231.36,9241.36,Limestone,17150,17180,shenzi#3,claude-vision
+9260.69,9287.36,Limestone,17238,17318,shenzi#4,claude-vision
+9294.02,9302.03,Limestone,17338,17362,shenzi#5,claude-vision
+9950.27,9959.61,Siltstone,19307,19335,shenzi#6,claude-vision
+16547.09,16620.42,Halite,39100,39320,shenzi#7,claude-vision
+19134.43,19207.75,Halite,46863,47083,shenzi#8,claude-vision
+21330.14,21362.14,Shale,53451,53547,shenzi#9,claude-vision
+22182.37,22255.69,Shale,56008,56228,shenzi#10,claude-vision
+24722.37,24785.7,Sandstone,63629,63819,shenzi#11,claude-vision
+24855.69,24929.02,Sandstone,64029,64249,shenzi#12,claude-vision

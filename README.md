@@ -41,7 +41,7 @@ regression test runs against `example/example.csv`.
 | File | Content |
 | --- | --- |
 | `<doc>.csv` | Submission format: `top_depth, bottom_depth, lithology, top_y, bottom_y, cluster_id` |
-| `diagnostics/<doc>.csv` | Same rows plus `confidence` and `notes` (failed physical checks) |
+| `diagnostics/<doc>.csv` | Same rows plus `confidence`, `notes`, `status` (`named` / `similar` = narrowed to 2-3 look-alike legend entries / `unresolved`) and `alternatives` |
 | `<doc>.png` | Annotated lithology column: intervals, boundary depths, labels, colour key |
 | `run_summary.csv`, `run_meta.json` | Per-document runtime, peak memory, warnings; commit and config hash |
 | `diagnostics/<doc>_naming.json`, `_legend.json` | Naming opinions per rock group; legend entries with swatch colours |
@@ -72,9 +72,10 @@ runs. Front-end development: `lith dash --dev` (API with reload) plus `cd dashbo
 | 2. Depth scale | `scale.py` | Tesseract on windows of the depth column, all 3 text orientations; exhaustive RANSAC line fit with "dropped digit" hypotheses; cross-checked against filename scale x TIFF DPI |
 | 3. Segment | `segment.py`, `features.py` | Per-block colour + pattern descriptors, change points (`ruptures` KernelCPD), boundary refinement to the pixel row, blank-paper detection |
 | 4. Cluster | `cluster.py` | Agglomerative clustering with a distance threshold (no fixed k) |
-| 5. Legend | `legend.py` | Swatch detection, OCR labels (right-of or below layouts), stroke-width-invariant match descriptors |
-| 6. Checks | `checks.py` | Contiguity, containment, depth increasing, minimum thickness; failures lower confidence |
-| 7. Output | `render.py` | CSV + annotated image (drawing code ported from the organisers' notebook) |
+| 5. Legend | `legend.py` | Swatch detection (ink or colour), repaired from the legend's own grid (size, columns, label offset); OCR labels (right-of or below layouts) with spelling fixes; rock vs symbol from label text, else from the swatch picture |
+| 6. Naming | `naming.py` | Opinions: two-way pixel template, classical descriptor, pretrained CNN (tier 2), stroke shapes; decisive opinion names the bed, otherwise a flagged best guess (rank vote + look-alike rules) |
+| 7. Checks | `checks.py` | Contiguity, containment, depth increasing, minimum thickness; failures lower confidence |
+| 8. Output | `render.py` | CSV + annotated image (drawing code ported from the organisers' notebook) |
 
 Every threshold lives in `config/default.yaml`, in feet or as a fraction of a box, never raw pixels.
 

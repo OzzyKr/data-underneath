@@ -70,6 +70,10 @@ class NamingConfig:
     confidence_agree: float
     confidence_one_sure: float
     confidence_unresolved: float
+    confidence_lookalike: float = 0.4
+    common_rocks: tuple[str, ...] = ()
+    use_strokes: bool = True
+    colour_gate: float = 12.0
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,10 @@ def _build(cls: type[T], data: dict[str, Any], path: str) -> T:
             if not isinstance(value, bool):
                 raise ValueError(f"config '{path}.{name}' must be true/false, got {value!r}")
             kwargs[name] = value
+        elif typ == tuple[str, ...]:
+            if not isinstance(value, list):
+                raise ValueError(f"config '{path}.{name}' must be a list, got {value!r}")
+            kwargs[name] = tuple(str(v) for v in value)
         else:
             kwargs[name] = str(value)
     return cls(**kwargs)

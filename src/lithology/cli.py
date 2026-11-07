@@ -89,8 +89,8 @@ def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
     }
 
 
-# Measured 2026-11-07 on all 51 logs: peak memory <= decoded image + ~1.3 GB (OCR, pretrained model, crops).
-_BASE_MB = 1300.0
+# Measured 2026-11-07 on all 51 logs: peak memory <= decoded image + ~1.8 GB (OCR, pretrained model, crops).
+_BASE_MB = 1800.0
 
 
 def estimate_peak_mb(doc: Document) -> float:

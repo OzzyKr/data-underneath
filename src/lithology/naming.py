@@ -13,6 +13,8 @@ With only the classical opinion, a group is named when its margin is decisive an
 
 from __future__ import annotations
 
+import re
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,7 +39,7 @@ def _top2(scores: np.ndarray, higher_is_better: bool) -> tuple[int, int, float]:
     return best, second, float(abs(scores[best] - scores[second]))
 
 
-def _fill_lab(rgb: np.ndarray, ink_luma: int = 110) -> np.ndarray:
+def fill_lab(rgb: np.ndarray, ink_luma: int = 110) -> np.ndarray:
     """Lab colour of the background (non-ink) pixels."""
     from skimage.color import rgb2lab
 
@@ -53,42 +55,57 @@ def template_similarity(
     min_detail: float = 12.0,
     colour_gate: float = 12.0,
 ) -> np.ndarray:
-    """Pixel template match (clusters x swatches): best normalised correlation of column pieces inside each swatch.
+    """Pixel template match (clusters x swatches), both ways: is the column piece in the swatch, and the swatch in
+    the column piece? The score is the weaker of the two.
 
     When a log draws its column and legend with the same software, a column piece is pixel-identical to its
-    swatch (score ~1.0). Pieces without real pattern detail (flat colour, std < ``min_detail``) say nothing and
-    are skipped, so thin flat slivers cannot produce false perfect scores. Correlation ignores average colour,
-    so a swatch whose background colour differs by more than ``colour_gate`` (Lab) scores 0. NaN = no usable piece.
+    swatch (score ~1.0). Matching both ways matters when one swatch is another plus extra marks ("Sandy clay-shale"
+    = "Clay-shale" + dots): a plain column is found inside both swatches, but only the plain swatch is found in the
+    column. Each swatch is matched at its own size (one tiny swatch must not shrink every comparison). Pieces
+    without real pattern detail (flat colour, std < ``min_detail``) say nothing and are skipped, so thin flat slivers
+    cannot produce false perfect scores. Correlation ignores average colour, so a swatch whose background colour
+    differs by more than ``colour_gate`` (Lab) scores 0. NaN = no usable piece.
     """
     import cv2
 
     tiled = [np.tile(s, (2, 2, 1)).astype(np.float32) for s in swatches]  # 2x2 so a piece can wrap the pattern
-    sw_fill = [_fill_lab(s) for s in swatches]
+    sw_fill = [fill_lab(s) for s in swatches]
+
+    def best(img: np.ndarray, tpl: np.ndarray) -> float:
+        return float(cv2.matchTemplate(img, tpl, cv2.TM_CCOEFF_NORMED).max())
+
     out = np.full((len(cluster_patches), len(swatches)), np.nan)
     for c, parts in enumerate(cluster_patches):
         scores: list[np.ndarray] = []
         for p in parts:
-            th = min(p.shape[0] - 4, min(s.shape[0] for s in swatches) - 2)
-            tw = min(p.shape[1] - 4, min(s.shape[1] for s in swatches) - 2)
-            if th < 8 or tw < 8:
+            if p.shape[0] < 12 or p.shape[1] < 12:
                 continue
-            y, x = (p.shape[0] - th) // 2, (p.shape[1] - tw) // 2
-            tpl = p[y : y + th, x : x + tw].astype(np.float32)
-            if tpl.std() < min_detail:
-                continue
-            fill = _fill_lab(p)
-            scores.append(
-                np.array(
-                    [
-                        float(cv2.matchTemplate(t, tpl, cv2.TM_CCOEFF_NORMED).max())
-                        if np.linalg.norm(fill - f) <= colour_gate
-                        else 0.0
-                        for t, f in zip(tiled, sw_fill, strict=True)
-                    ]
-                )
-            )
+            pf = p.astype(np.float32)
+            p_tiled = np.tile(pf, (1, 2, 1))  # the swatch window may wrap across the column's width
+            fill = fill_lab(p)
+            row = np.full(len(swatches), np.nan)
+            for k, (s, t, f) in enumerate(zip(swatches, tiled, sw_fill, strict=True)):
+                th, tw = min(p.shape[0] - 4, s.shape[0] - 2), min(p.shape[1] - 4, s.shape[1] - 2)
+                if th < 8 or tw < 8:
+                    continue
+                y, x = (p.shape[0] - th) // 2, (p.shape[1] - tw) // 2
+                tpl = pf[y : y + th, x : x + tw]
+                if tpl.std() < min_detail:
+                    continue
+                if np.linalg.norm(fill - f) > colour_gate:
+                    row[k] = 0.0
+                    continue
+                sy, sx = (s.shape[0] - th) // 2, (s.shape[1] - tw) // 2
+                rev = s[sy : sy + th, sx : sx + tw].astype(np.float32)
+                fwd = best(t, tpl)
+                back = best(p_tiled, rev) if rev.std() >= min_detail else fwd
+                row[k] = min(fwd, back)
+            if np.isfinite(row).any():
+                scores.append(row)
         if scores:
-            out[c] = np.mean(scores, axis=0)
+            with warnings.catch_warnings():  # a swatch no piece could be compared with stays NaN (no opinion)
+                warnings.simplefilter("ignore", RuntimeWarning)
+                out[c] = np.nanmean(np.stack(scores), axis=0)
     return out
 
 
@@ -98,7 +115,8 @@ def decide(
     """Decide one group. ``distance``: classical distance per swatch (lower = closer).
     ``similarity``: pretrained cosine similarity per swatch (higher = closer), or None when tier 2 is off.
     ``template``: pixel template scores per swatch (NaN = no opinion); a near-exact match is decisive on its own."""
-    if template is not None and np.isfinite(template).all():
+    if template is not None and np.isfinite(template).any():
+        template = np.nan_to_num(template, nan=-1.0)  # swatches it could not compare have no say
         t, t2, t_margin = _top2(template, higher_is_better=True)
         if template[t] >= cfg.template_min_score:
             if t_margin >= cfg.template_decisive_margin:
@@ -115,8 +133,10 @@ def decide(
         return Naming(None, cfg.confidence_unresolved, [a, a2], "classical match too close to call")
     b, b2, b_margin = _top2(similarity, higher_is_better=True)
     b_sure = b_margin >= cfg.pretrained_decisive_margin
-    if a == b:
+    if a == b and (a_sure or b_sure):
         return Naming(a, cfg.confidence_agree, [a, a2 if a2 != a else b2], "classical and pretrained agree")
+    if a == b:  # both unsure: the same top pick is a lead, not a decision
+        return Naming(None, cfg.confidence_unresolved, list(dict.fromkeys([a, a2, b2])), "both unsure, same lead")
     if a_sure and not b_sure:
         return Naming(a, cfg.confidence_one_sure, [a, b], "classical decisive, pretrained unsure")
     if b_sure and not a_sure:
@@ -126,5 +146,148 @@ def decide(
     return Naming(None, cfg.confidence_unresolved, cands, why)
 
 
+def classify_flagged(
+    pick: int, candidates: list[int], swatch_fill: np.ndarray, bed_matches_pick: bool, colour_gate: float
+) -> tuple[str, list[int]]:
+    """A flagged group is 'similar' when vision narrowed it to 2-3 look-alike legend entries: candidates with the best
+    guess's fill colour (Lab distance <= ``colour_gate``), the bed itself having that colour. Otherwise it is
+    'unresolved': no entry matches clearly, or the candidates do not even look alike. Returns (status, entries)."""
+    cands = list(dict.fromkeys([pick, *candidates]))
+    alike = [i for i in cands if np.linalg.norm(swatch_fill[i] - swatch_fill[pick]) <= colour_gate][:3]
+    if bed_matches_pick and len(alike) >= 2:
+        return "similar", alike
+    return "unresolved", cands[:3]
+
+
+def similar_note(names: list[str]) -> str:
+    return "similar types: computer vision could not differentiate " + " or ".join(dict.fromkeys(names))
+
+
 def unresolved_note(candidates: list[str]) -> str:
     return "computer vision could not differentiate: " + " or ".join(dict.fromkeys(candidates)) + "?"
+
+
+# ------------------------------------------------------------------------------------------ best guess
+# When no opinion is decisive, the CSV still gets a name (naming.abstain: false), flagged with a low confidence and
+# the "could not differentiate" note. The guess is chosen in three explainable steps:
+#   1. rank aggregation: every opinion ranks all swatches; ranks are summed (the pixel template counts double when it
+#      has a real opinion, as it compares actual pixels), best total wins;
+#   2. look-alike variants: if the leading candidates are one rock with different modifiers ("Clay-shale" /
+#      "Sandy clay-shale", "Sand" / "Sandstone", "Limestone" / "Dolomitic limestone"), write the plainest entry;
+#   3. identical swatches: if the legend draws the winner and another entry pixel-identically (b&w "Clay" and
+#      "Shale"), the picture cannot decide: write the plainer, then the more common rock (naming.common_rocks).
+
+# A rock word stands for its base rock; "sand" and "sandstone" are the same rock for this purpose.
+_SAME_ROCK = {"sand": "sandstone", "silt": "siltstone", "clay": "claystone", "dolostone": "dolomite", "salt": "halite"}
+
+
+def _rank(scores: np.ndarray, higher_is_better: bool) -> np.ndarray:
+    order = np.argsort(-scores if higher_is_better else scores, kind="stable")
+    r = np.empty(len(scores))
+    r[order] = np.arange(len(scores))
+    return r
+
+
+def aggregate_rank(
+    distance: np.ndarray, similarity: np.ndarray | None, template: np.ndarray | None, strokes: np.ndarray | None = None
+) -> np.ndarray:
+    """Sum of each opinion's rank per swatch (0 = best); lower total = more likely."""
+    total = _rank(distance, higher_is_better=False)
+    if strokes is not None and np.isfinite(strokes).all():
+        total = total + _rank(strokes, higher_is_better=False)
+    if similarity is not None and np.isfinite(similarity).all():
+        total = total + _rank(similarity, higher_is_better=True)
+    if template is not None and np.isfinite(template).any() and np.nanmax(template) >= 0.5:
+        total = total + 2 * _rank(np.nan_to_num(template, nan=-1.0), higher_is_better=True)
+    return total
+
+
+def rock_parts(label: str) -> tuple[frozenset[str], int]:
+    """(base rock words, number of other words) of a legend label: "Sandy clay-shale" -> ({claystone, shale}, 1)."""
+    from lithology.legend import MODIFIER_WORDS, ROCK_WORDS, correct_word
+
+    nouns = set(ROCK_WORDS) - set(MODIFIER_WORDS) - {"sandy", "silty"}
+    words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
+    base = frozenset(_SAME_ROCK.get(w, w) for w in words if w in nouns)
+    return base, sum(w not in nouns for w in words)
+
+
+def _commonness(label: str, common: tuple[str, ...]) -> int:
+    base, _ = rock_parts(label)
+    ranks = [common.index(w) for w in base if w in common] + [
+        common.index(_SAME_ROCK.get(w, w)) for w in base if _SAME_ROCK.get(w, w) in common
+    ]
+    return min(ranks) if ranks else len(common)
+
+
+def _tops(
+    distance: np.ndarray, similarity: np.ndarray | None, template: np.ndarray | None, strokes: np.ndarray | None
+) -> list[int]:
+    """Top pick of every opinion that has one (template only when it found a real resemblance)."""
+    tops = [int(np.argmin(distance))]
+    if similarity is not None and np.isfinite(similarity).all():
+        tops.append(int(np.argmax(similarity)))
+    if template is not None and np.isfinite(template).any() and np.nanmax(template) >= 0.5:
+        tops.append(int(np.nanargmax(template)))
+    if strokes is not None and np.isfinite(strokes).all():
+        tops.append(int(np.argmin(strokes)))
+    return tops
+
+
+def best_guess(
+    candidates: list[int],
+    labels: list[str],
+    distance: np.ndarray,
+    similarity: np.ndarray | None,
+    template: np.ndarray | None,
+    identical: list[set[int]],
+    cfg: NamingConfig,
+    strokes: np.ndarray | None = None,
+    colour_ok: np.ndarray | None = None,
+) -> tuple[int, float, str, bool]:
+    """(swatch index, confidence, reason, still flagged) for a group no single opinion settled. See notes above.
+
+    ``colour_ok``: swatches whose fill colour matches the group's; when any does, only those can be the guess
+    (colour is the most reliable cue on colour logs, and the pretrained model is nearly colour-blind).
+    """
+    agg = aggregate_rank(distance, similarity, template, strokes)
+    pool = set(candidates)
+    if colour_ok is not None and colour_ok.any():
+        ok = {i for i in pool if colour_ok[i]}
+        # no candidate has the right colour: take the best-ranked swatches that do
+        pool = ok or set(sorted(np.flatnonzero(colour_ok).tolist(), key=lambda i: agg[i])[:3])
+    tops = [t for t in _tops(distance, similarity, template, strokes) if t in pool or colour_ok is None]
+    if len(tops) >= 2 and len(set(tops)) == 1:  # every opinion leans the same way
+        if len(tops) >= 3:
+            return tops[0], cfg.confidence_one_sure, f"all {len(tops)} opinions lean to this entry", False
+        return tops[0], cfg.confidence_lookalike, "both opinions lean to this entry", True
+    ranked = sorted(pool, key=lambda i: agg[i])
+    top = ranked[0]
+    base, _ = rock_parts(labels[top])
+    if base:
+        same = [i for i in ranked if rock_parts(labels[i])[0] == base]
+        if len(same) > 1:  # the opinions split between variants of one rock
+            pick = min(same, key=lambda i: (rock_parts(labels[i])[1], agg[i]))
+            return pick, cfg.confidence_lookalike, "variants of one rock: wrote the plainest legend entry", True
+    twins = next((g for g in identical if top in g), None)
+    if twins and len(twins) > 1:
+        pick = min(twins, key=lambda i: (rock_parts(labels[i])[1], _commonness(labels[i], cfg.common_rocks), agg[i]))
+        why = "legend draws these entries identically: wrote the plainer, more common rock"
+        return pick, cfg.confidence_lookalike, why, True
+    return top, cfg.confidence_unresolved, "best guess by rank over all opinions", True
+
+
+def identical_swatches(inner: list[np.ndarray], threshold: float = 0.9) -> list[set[int]]:
+    """Groups of legend swatches that are pixel-identical to each other (two-way template match >= threshold)."""
+    sim = template_similarity([[s] for s in inner], inner)
+    n = len(inner)
+    groups: list[set[int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if np.isfinite(sim[i, j]) and np.isfinite(sim[j, i]) and min(sim[i, j], sim[j, i]) >= threshold:
+                g = next((g for g in groups if i in g or j in g), None)
+                if g is None:
+                    groups.append({i, j})
+                else:
+                    g |= {i, j}
+    return groups

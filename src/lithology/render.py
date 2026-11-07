@@ -31,7 +31,7 @@ BOX_COLORS = {"depth": (255, 0, 0), "lithology": (0, 160, 255), "legend": (255, 
 
 def write_csv(intervals: Iterable[Interval], path: Path, *, with_diagnostics: bool = False) -> None:
     """Write the submission CSV (organisers' column order). Diagnostics add confidence and notes."""
-    cols = list(CSV_COLUMNS) + (["confidence", "notes"] if with_diagnostics else [])
+    cols = list(CSV_COLUMNS) + (["confidence", "notes", "status", "alternatives"] if with_diagnostics else [])
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
@@ -41,6 +41,8 @@ def write_csv(intervals: Iterable[Interval], path: Path, *, with_diagnostics: bo
             if with_diagnostics:
                 row["confidence"] = round(iv.confidence, 3)
                 row["notes"] = "; ".join(iv.notes)
+                row["status"] = iv.status
+                row["alternatives"] = " / ".join(iv.alternatives)
             w.writerow(row)
 
 

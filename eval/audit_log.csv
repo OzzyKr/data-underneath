@@ -1,2 +1,9 @@
 timestamp,commit,config_hash,pred,note,n,correct,accuracy,flagged,confident_wrong
 2026-11-07T20:16:40,e2bebd2-dirty,89788cf4acf0,base,baseline e2bebd2 tier2 abstain,65,34,0.5231,21,10
+2026-11-07T20:28:25,b7485f7-dirty,d9b7bee9e3b0,legend,INVALID - code changed during run (mixed versions),65,48,0.7385,14,3
+2026-11-07T20:34:17,b7485f7-dirty,d6b0aa5d5afd,c_all,c_all: legend repair+spelling+rock filter+2way template+best guess (abstain false),65,54,0.8308,24,1
+2026-11-07T20:38:38,b7485f7-dirty,3d00a0c0ba71,base,base rescored on 91-label audit,91,52,0.5714,23,16
+2026-11-07T20:38:40,b7485f7-dirty,3d00a0c0ba71,c_all,c_all rescored on 91-label audit,91,78,0.8571,28,1
+2026-11-07T20:39:15,b7485f7-dirty,3d00a0c0ba71,d_strokes,d_strokes: c_all + stroke-shape opinion in best guess,91,80,0.8791,28,1
+2026-11-07T20:45:33,b7485f7-dirty,3d00a0c0ba71,out,"e_rules (strokes+unanimity+split-only variants+colour filter), out/ run",91,80,0.8791,20,3
+2026-11-07T20:56:14,b7485f7-dirty,3d00a0c0ba71,out,similar-types category (status column); same naming as e_rules,91,80,0.8791,20,3

@@ -176,6 +176,8 @@ class Interval:
     bottom_depth: float = float("nan")
     confidence: float = 1.0
     notes: list[str] = field(default_factory=list)
+    status: str = "named"  # named | similar (2-3 look-alike legend entries) | unresolved (nothing matches clearly)
+    alternatives: list[str] = field(default_factory=list)  # the look-alike or candidate entries, best guess first
 
     def __post_init__(self) -> None:
         if self.bottom_y <= self.top_y:

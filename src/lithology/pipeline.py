@@ -17,11 +17,20 @@ import numpy as np
 from lithology.checks import check_intervals
 from lithology.cluster import cluster_intervals, merge_adjacent
 from lithology.config import Config
-from lithology.features import match_descriptor
+from lithology.features import match_descriptor, stroke_descriptor, stroke_distances
 from lithology.io import Document, crop_rgb, image_dpi, open_image
 from lithology.legend import match_distances, read_legend, swatch_colour, swatch_descriptor
 from lithology.models import Box, DocumentBoxes, DocumentResult, Interval
-from lithology.naming import decide, template_similarity, unresolved_note
+from lithology.naming import (
+    best_guess,
+    classify_flagged,
+    decide,
+    fill_lab,
+    identical_swatches,
+    similar_note,
+    template_similarity,
+    unresolved_note,
+)
 from lithology.render import render_annotated, write_csv
 from lithology.scale import estimate_scale, prior_px_per_ft
 from lithology.segment import core_box_x, interval_descriptors, segment_column
@@ -158,6 +167,8 @@ def _process(
         names: dict[int, str] = {}
         match_conf: dict[int, float] = {}
         notes: dict[int, str] = {}
+        status: dict[int, str] = {}
+        alternatives: dict[int, list[str]] = {}
         rocks = [e for e in entries if e.is_rock] or entries  # never name a bed after a drilling symbol
         if rocks and len(ids):
             entries = rocks
@@ -185,6 +196,33 @@ def _process(
                         decisions[c] = decide(dist[c], sim[c], cfg.naming, tmpl[c])
                 except Exception as e:  # the second opinion is optional: degrade to classical only
                     res.warnings.append(f"pretrained second opinion unavailable ({type(e).__name__}: {e})")
+            # Groups no opinion settled still get a flagged best guess (see lithology.naming.best_guess).
+            labels = [e.label for e in entries]
+            identical = identical_swatches(inner)
+            guesses: dict[int, tuple[int, float, str, bool]] = {}
+            bed_colour_ok: dict[int, np.ndarray | None] = {}
+            sw_fill = np.array([fill_lab(s, cfg.segment.ink_luma) for s in inner])
+            strokes = np.full((n_clusters, len(entries)), np.nan)
+            open_now = [c for c, d in enumerate(decisions) if d.swatch is None]
+            if cfg.naming.use_strokes and open_now:
+                sw_strokes = np.array([stroke_descriptor(s, cfg.segment.ink_luma) for s in inner])
+                for c in open_now:
+                    parts = [p for p in patches[c] if p.shape[0] >= 8 and p.shape[1] >= 8]
+                    if parts:
+                        cd = np.median([stroke_descriptor(p, cfg.segment.ink_luma) for p in parts], axis=0)
+                        strokes[c] = stroke_distances(cd[None], sw_strokes)[0]
+            for c in open_now:
+                d = decisions[c]
+                s_c = sim[c] if np.isfinite(sim[c]).all() else None
+                k_c = strokes[c] if np.isfinite(strokes[c]).all() else None
+                cands = d.candidates + ([int(np.argmin(k_c))] if k_c is not None else [])
+                parts = [p for p in patches[c] if p.size]
+                colour_ok = None
+                if parts:
+                    g_fill = np.mean([fill_lab(p, cfg.segment.ink_luma) for p in parts], axis=0)
+                    colour_ok = np.linalg.norm(sw_fill - g_fill, axis=1) <= cfg.naming.colour_gate
+                bed_colour_ok[c] = colour_ok
+                guesses[c] = best_guess(cands, labels, dist[c], s_c, tmpl[c], identical, cfg.naming, k_c, colour_ok)
             for c, d in enumerate(decisions):
                 a = np.argsort(dist[c])[:2]
                 rec = {
@@ -195,8 +233,13 @@ def _process(
                     "reason": d.reason,
                     "confidence": d.confidence,
                 }
-                if np.isfinite(tmpl[c]).all():
-                    best2 = np.argsort(-tmpl[c])[:2]
+                if c in guesses:
+                    rec["guess"], rec["guess_reason"] = entries[guesses[c][0]].label, guesses[c][2]
+                if np.isfinite(strokes[c]).all():
+                    k = np.argsort(strokes[c])[:2]
+                    rec["strokes"] = [[entries[i].label, round(float(strokes[c][i]), 3)] for i in k]
+                if np.isfinite(tmpl[c]).any():
+                    best2 = np.argsort(-np.nan_to_num(tmpl[c], nan=-1.0))[:2]
                     rec["template"] = [[entries[i].label, round(float(tmpl[c][i]), 3)] for i in best2]
                 if np.isfinite(sim[c]).all():
                     b = np.argsort(-sim[c])[:2]
@@ -205,7 +248,9 @@ def _process(
             # Groups the legend calls the same rock become one group (ids agree with names, touching beds merge).
             # Unresolved groups with the same candidates share one id: the same ambiguity is the same pattern.
             key_of = {
-                c: ("rock", d.swatch) if d.swatch is not None else ("open", tuple(sorted(d.candidates)))
+                c: ("rock", d.swatch)
+                if d.swatch is not None
+                else (("guess" if guesses[c][3] else "rock"), guesses[c][0])
                 for c, d in enumerate(decisions)
             }
             new_id: dict[tuple, int] = {}
@@ -220,11 +265,22 @@ def _process(
                     names[r] = entries[d.swatch].label
                 else:
                     # abstain: say so in the CSV; otherwise write the best guess but keep the uncertainty note
-                    names[r] = cfg.naming.unresolved_label if cfg.naming.abstain else entries[d.candidates[0]].label
-                    notes[r] = unresolved_note([entries[i].label for i in d.candidates])
+                    pick, conf, _, flagged = guesses[c]
+                    if flagged:
+                        names[r] = cfg.naming.unresolved_label if cfg.naming.abstain else entries[pick].label
+                        ok = bed_colour_ok.get(c)
+                        st, alts = classify_flagged(
+                            pick, d.candidates, sw_fill, ok is None or bool(ok[pick]), cfg.naming.colour_gate
+                        )
+                        status[r], alternatives[r] = st, [entries[i].label for i in alts]
+                        notes[r] = (similar_note if st == "similar" else unresolved_note)(alternatives[r])
+                    else:
+                        names[r] = entries[pick].label
+                    match_conf[r] = min(match_conf.get(r, 1.0), conf)
+                    continue
                 match_conf[r] = min(match_conf.get(r, 1.0), d.confidence)
             ids = np.array([remap[int(c)] for c in ids])
-            n_open = sum(d.swatch is None for c, d in enumerate(decisions) if c in remap)
+            n_open = sum(d.swatch is None and guesses[c][3] for c, d in enumerate(decisions) if c in remap)
             if n_open:
                 res.warnings.append(f"{n_open} rock group(s) could not be named with confidence")
         else:
@@ -245,6 +301,8 @@ def _process(
                 bottom_depth=scale.depth(y1) if scale else float("nan"),
                 confidence=(scale.confidence if scale else 0.3) * match_conf.get(int(c), 0.5),
                 notes=[notes[int(c)]] if int(c) in notes else [],
+                status=status.get(int(c), "named"),
+                alternatives=alternatives.get(int(c), []),
             )
             intervals.append(iv)
         res.warnings += check_intervals(intervals, lc, cfg.checks)

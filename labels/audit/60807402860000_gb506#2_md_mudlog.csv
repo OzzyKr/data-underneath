@@ -1,0 +1,6 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+7162.49,7182.45,Clay/Shale,2327,2367,gb506#1,claude-vision
+7684.74,7724.67,Sandstone,3373,3453,gb506#3,claude-vision
+8412.69,8512.54,Shale,4831,5031,gb506#4,claude-vision
+9652.42,9664.39,Sandstone,7314,7338,gb506#5,claude-vision
+9856.12,9965.96,Shale,7722,7942,gb506#6,claude-vision

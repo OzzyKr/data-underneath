@@ -205,6 +205,19 @@ def test_csv_roundtrip_and_render(tmp_path, synth_doc):
         ("Others-H", True),
         ("rite", False),
         ("fio", False),
+        ("Casing Top", False),
+        ("Pumps Off Gas", False),
+        ("Tripping (POOH-RIH)", False),
+        ("Oil Moderate", False),
+        ("Shell fragments", False),
+        ("CHLORITIZATION", False),
+        ("NO SAMPLE", False),
+        ("Diatoms", False),
+        ("Diatomite", True),
+        ("Gas sand", True),
+        ("Bitumen", True),
+        ("QUARTZ LATITE", True),
+        ("Silstone", True),
     ],
 )
 def test_drilling_symbols_and_modifiers_are_not_rock_types(label, rock):
@@ -229,8 +242,10 @@ def test_naming_agree_named_disagree_unresolved():
 
     cfg = _naming_cfg()
     dist = np.array([0.5, 0.6, 5.0])  # classical unsure between 0 and 1
-    agree = decide(dist, np.array([0.90, 0.89, 0.2]), cfg)
+    agree = decide(dist, np.array([0.90, 0.80, 0.2]), cfg)  # pretrained sure, and the same pick
     assert agree.swatch == 0 and agree.confidence == cfg.confidence_agree
+    weak = decide(dist, np.array([0.90, 0.89, 0.2]), cfg)  # both unsure: the same lead is not a decision
+    assert weak.swatch is None and weak.candidates[0] == 0
     unsure = decide(dist, np.array([0.89, 0.90, 0.2]), cfg)  # both unsure and they disagree
     assert unsure.swatch is None and set(unsure.candidates) >= {0, 1}
     pretrained_sure = decide(dist, np.array([0.70, 0.95, 0.2]), cfg)
@@ -276,3 +291,104 @@ def test_lenient_name_match():
     assert lenient_match("SHALE", "Shale")
     assert not lenient_match("Silty Sandstone", "Siltstone")
     assert not lenient_match("Unresolved", "Shale")
+
+
+def test_unknown_words_are_decided_by_the_swatch_picture():
+    import numpy as np
+
+    from lithology.legend import is_rock_type
+
+    fill = np.full((40, 60, 3), 255, np.uint8)
+    fill[::6, :, :] = 0  # ruled pattern over the whole box: a rock texture
+    glyph = np.full((40, 60, 3), 255, np.uint8)
+    glyph[16:24, 26:34] = 0  # one small symbol in the middle
+    assert is_rock_type("Porphyry", fill) is True
+    assert is_rock_type("Porphyry", glyph) is False
+
+
+@pytest.mark.parametrize(
+    "printed, fixed",
+    [
+        ("Silstone", "Siltstone"),
+        ("Dolornitic", "Dolomitic"),
+        ("lirnestone", "limestone"),
+        ("Llmestone", "Limestone"),
+        ("Dolomites", "Dolomites"),  # a plural is not a misspelling
+        ("Sandstones", "Sandstones"),
+        ("Shale", "Shale"),
+    ],
+)
+def test_spelling_fixes(printed, fixed):
+    from lithology.legend import correct_word
+
+    assert correct_word(printed) == fixed
+
+
+def test_best_guess_variants_and_identical_swatches():
+    import numpy as np
+
+    from lithology.naming import best_guess
+
+    cfg = _naming_cfg()
+    labels = ["Sandy clay-shale", "Clay-shale", "Halite", "Clay", "Shale"]
+    dist = np.array([0.1, 0.5, 9.0, 3.0, 3.1])
+    sim_split = np.array([0.80, 0.90, 0.1, 0.2, 0.2])  # pretrained prefers the plain one: the opinions split
+    # opinions split between variants of one rock: the plainest legend entry
+    pick, conf, why, flagged = best_guess([0, 1], labels, dist, sim_split, None, [], cfg)
+    assert labels[pick] == "Clay-shale" and conf == cfg.confidence_lookalike and "plainest" in why and flagged
+    # drawn identically (Clay = Shale) and the opinions split: the more common rock
+    pick, _, why, _ = best_guess([3, 4], labels, dist, np.array([0.1, 0.1, 0.1, 0.5, 0.4]), None, [{3, 4}], cfg)
+    assert labels[pick] == "Shale" and "identically" in why
+    # otherwise the best total rank over all opinions (pretrained and template overrule a weak classical lead)
+    pick, conf, _, flagged = best_guess(
+        [2, 3],
+        labels,
+        np.array([0.1, 0.5, 2.0, 2.1, 9.0]),
+        np.array([0.1, 0.2, 0.5, 0.9, 0.3]),
+        np.array([np.nan, np.nan, 0.6, 0.9, np.nan]),
+        [],
+        cfg,
+    )
+    assert labels[pick] == "Clay" and flagged
+
+
+def test_best_guess_unanimous_and_colour():
+    import numpy as np
+
+    from lithology.naming import best_guess
+
+    cfg = _naming_cfg()
+    labels = ["SHALE", "SHALE GRAY", "SILTSTONE", "ANHYDRITE"]
+    dist = np.array([2.0, 1.0, 5.0, 5.0])
+    sim = np.array([0.88, 0.90, 0.5, 0.5])
+    tmpl = np.array([0.65, 0.84, 0.0, 0.0])
+    # three unsure opinions all lean to SHALE GRAY: named, not overridden by the plain variant
+    pick, conf, why, flagged = best_guess([0, 1], labels, dist, sim, tmpl, [], cfg)
+    assert labels[pick] == "SHALE GRAY" and not flagged and conf == cfg.confidence_one_sure
+    # an orange bed: only orange swatches can be the guess, whatever the colour-blind opinions say
+    colour_ok = np.array([False, False, True, True])
+    pick, _, _, _ = best_guess([0, 1], labels, dist, sim, None, [], cfg, colour_ok=colour_ok)
+    assert labels[pick] in ("SILTSTONE", "ANHYDRITE")
+
+
+def test_rock_parts():
+    from lithology.naming import rock_parts
+
+    assert rock_parts("Sandy clay-shale")[0] == rock_parts("Clay-shale")[0]
+    assert rock_parts("Sand")[0] == rock_parts("Sandstone")[0]
+    assert rock_parts("Dolomitic limestone") == (frozenset({"limestone"}), 1)
+    assert rock_parts("Shale")[0] != rock_parts("Clay")[0]
+
+
+def test_flagged_beds_are_similar_types_or_unresolved():
+    import numpy as np
+
+    from lithology.naming import classify_flagged
+
+    fills = np.array([[80.0, -40, 40], [81.0, -41, 41], [60.0, 10, 60], [79.0, -39, 40]])  # 0, 1, 3 the same green
+    # narrowed to look-alike entries of the bed's own colour -> similar types
+    assert classify_flagged(0, [1, 2, 3], fills, True, 12.0) == ("similar", [0, 1, 3])
+    # candidates that do not look alike -> unresolved
+    assert classify_flagged(0, [2], fills, True, 12.0)[0] == "unresolved"
+    # the bed does not even have the guess's colour -> unresolved
+    assert classify_flagged(0, [1, 3], fills, False, 12.0)[0] == "unresolved"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -69,6 +69,45 @@ ROCK_WORDS = [
     "glauconite",
     "oolitic",
     "fossils",
+    # added 2026-11-07: names seen across mud-log legends, so OCR slips in them are corrected too
+    "wackestone",
+    "packstone",
+    "grainstone",
+    "calcilutite",
+    "coquina",
+    "diatomite",
+    "porcelanite",
+    "phosphate",
+    "ironstone",
+    "sylvite",
+    "carnallite",
+    "polyhalite",
+    "potash",
+    "andesite",
+    "dacite",
+    "rhyolite",
+    "latite",
+    "diorite",
+    "granodiorite",
+    "monzonite",
+    "gabbro",
+    "obsidian",
+    "pyroclastics",
+    "volcaniclastics",
+    "volcanic",
+    "intrusives",
+    "ignimbrite",
+    "serpentine",
+    "schist",
+    "gneiss",
+    "quartzite",
+    "slate",
+    "marble",
+    "paleosol",
+    "caliche",
+    "anthracite",
+    "peat",
+    "loess",
 ]
 
 
@@ -149,18 +188,89 @@ MODIFIER_WORDS = set(
 )
 
 
+_KNOWN_WORDS = set(ROCK_WORDS) | SYMBOL_WORDS | MODIFIER_WORDS
+
+
 def _fragmentary(text: str) -> bool:
     """True when no word of the text is a known rock, symbol or modifier word (e.g. "rite" from "Anhydrite")."""
     known = set(ROCK_WORDS) | SYMBOL_WORDS | MODIFIER_WORDS
     return not any(correct_word(w).lower() in known for w in re.findall(r"[A-Za-z]{2,}", text))
 
 
-def is_rock_type(label: str) -> bool:
-    """A usable rock name: not only symbol/modifier words, and not a short unknown OCR fragment ("rite", "fio")."""
-    words = [w.lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
-    if not words or all(w in SYMBOL_WORDS | MODIFIER_WORDS for w in words):
+# Word stems that mark a legend entry as a drilling, show or sample symbol, an accessory or an alteration, not a rock.
+# They decide only when no rock word is present ("Gas sand" stays a rock).
+NON_ROCK_STEMS = (
+    "casing",
+    "shoe",
+    "trip",
+    "pump",
+    "survey",
+    "deviat",
+    "dewiat",
+    "oil",
+    "gas",
+    "show",
+    "sample",
+    "core",
+    "marker",
+    "water",
+    "fluor",
+    "stain",
+    "drill",
+    "kick",
+    "flow",
+    "test",
+    "fragment",
+    "fossil",
+    "foram",
+    "diatoms",
+    "alter",
+    "symbol",
+)
+NON_ROCK_SUFFIXES = ("ization", "isation", "ification")  # alteration, e.g. "Chloritization", "Silicification"
+
+
+def _non_rock_word(w: str) -> bool:
+    return w in SYMBOL_WORDS or w.startswith(NON_ROCK_STEMS) or w.endswith(NON_ROCK_SUFFIXES)
+
+
+def swatch_is_texture(rgb: np.ndarray, ink_luma: int = 110) -> bool:
+    """A rock swatch is a fill: a coloured area, or ink spread over the whole box. A symbol is one glyph on white."""
+    h, w = rgb.shape[:2]
+    inner = rgb[int(h * 0.15) : int(h * 0.85) or h, int(w * 0.15) : int(w * 0.85) or w]
+    if inner.size == 0:
         return False
-    return any(w in ROCK_WORDS for w in words) or max(len(w) for w in words) >= 5
+    px = inner.astype(np.int16)
+    coloured = (px.max(axis=2) - px.min(axis=2)) > 40
+    if coloured.mean() > 0.3:
+        return True
+    ink = (px @ np.array([0.299, 0.587, 0.114])) < 200
+    if ink.mean() > 0.6:  # solid dark fill (coal)
+        return True
+    hh, ww = ink.shape
+    cells = [ink[i * hh // 3 : (i + 1) * hh // 3, j * ww // 3 : (j + 1) * ww // 3] for i in range(3) for j in range(3)]
+    return bool(sum(c.size > 0 and c.mean() > 0.01 for c in cells) >= 6)
+
+
+def is_rock_type(label: str, swatch_rgb: np.ndarray | None = None) -> bool:
+    """Can a bed be named after this legend entry? Text decides first, the swatch picture when the text cannot.
+
+    1. A rock word (after OCR/print slip correction) -> rock ("Silty Sandstone", "Gas sand").
+    2. Otherwise a drilling/show/accessory/alteration word, or only modifiers -> not a rock ("Casing Top",
+       "Pumps Off Gas", "Tripping (POOH-RIH)", "Oil Moderate", "Shell fragments", "Chloritization", "Sandy").
+    3. Otherwise (unknown words only, e.g. "Dacite"-like names not in the list, "Others-H"): rock if its swatch is a
+       fill texture rather than a single glyph; without a swatch, any word of 5+ letters counts (not "rite", "fio").
+    """
+    words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
+    if not words:
+        return False
+    if any(w in ROCK_WORDS and w not in MODIFIER_WORDS for w in words):
+        return True
+    if any(_non_rock_word(w) for w in words) or all(w in MODIFIER_WORDS for w in words):
+        return False
+    if max(len(w) for w in words) < 5:
+        return False
+    return swatch_is_texture(swatch_rgb) if swatch_rgb is not None else True
 
 
 @dataclass
@@ -189,6 +299,7 @@ class _Phrase:
     x1: int
     y1: int
     conf: float
+    words: list[_Word] = field(default_factory=list)
 
 
 _CONFUSABLE = ("il1tfj|", "o0ce", "s5", "b6h", "rn", "uv", "z2", "g9q")
@@ -198,23 +309,41 @@ def _confusable(a: str, b: str) -> bool:
     return any(a in group and b in group for group in _CONFUSABLE)
 
 
-def correct_word(word: str) -> str:
-    """Fix OCR letter substitutions in a purely alphabetic word ("Llmestone" -> "Limestone").
+def _one_indel(short: str, long: str) -> bool:
+    """``long`` is ``short`` with one letter inserted, not at the end (so plurals like "Dolomites" do not count)."""
+    if len(long) != len(short) + 1 or long[:-1] == short:
+        return False
+    i = next((k for k in range(len(short)) if short[k] != long[k]), len(short))
+    return short[i:] == long[i + 1 :]
 
-    Only same-length matches with most letters already equal are accepted: OCR swaps look-alike letters, it does
-    not add or drop them, so "Dolomites" or "Clay-S" are left exactly as printed.
+
+def correct_word(word: str) -> str:
+    """Fix OCR and print slips in a purely alphabetic word against known rock words.
+
+    Accepted: look-alike letter swaps ("Llmestone" -> "Limestone"), OCR's "rn" for "m" ("lirnestone"), and for words
+    of 6+ letters one dropped or doubled letter inside the word ("Silstone" -> "Siltstone"). A trailing letter is
+    never added or removed, so "Dolomites" or "Clay-S" stay exactly as printed.
     """
     low = word.lower()
     if len(low) < 4 or not low.isalpha() or low in ROCK_WORDS:
         return word
     best = None
+    for v in {low.replace("rn", "m"), low.replace("vv", "w")} - {low}:
+        if v in ROCK_WORDS:
+            best = (0, v)
     for cand in ROCK_WORDS:
-        if len(cand) != len(low):
-            continue
-        diffs = [(a, b) for a, b in zip(low, cand, strict=True) if a != b]
-        ok = 0 < len(diffs) <= 2 and all(_confusable(a, b) for a, b in diffs)
-        if ok and (best is None or len(diffs) < best[0]):
-            best = (len(diffs), cand)
+        if best is not None and best[0] == 0:
+            break
+        if len(cand) == len(low):
+            diffs = [(a, b) for a, b in zip(low, cand, strict=True) if a != b]
+            if (
+                0 < len(diffs) <= 2
+                and all(_confusable(a, b) for a, b in diffs)
+                and (best is None or len(diffs) < best[0])
+            ):
+                best = (len(diffs), cand)
+        elif len(low) >= 6 and (_one_indel(low, cand) or _one_indel(cand, low)) and best is None:
+            best = (3, cand)
     if best is None:
         return word
     fixed = best[1]
@@ -280,6 +409,7 @@ def _phrases(words: list[_Word]) -> list[_Phrase]:
                 max(w.x1 for w in line),
                 max(w.y1 for w in line),
                 float(np.mean([w.conf for w in line])),
+                sorted(line, key=lambda w: w.x0),
             )
         )
     return out
@@ -294,7 +424,20 @@ def _is_wordlike(w: _Word) -> bool:
     return w.conf >= (30 if known else 60)
 
 
-def _swatch_candidates(gray: np.ndarray, words: list[_Word], min_px: int) -> list[Box]:
+def _content_mask(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
+    """Pixels that belong to a drawing rather than paper: dark ink, or a clearly coloured fill.
+
+    Colour matters for light fills: pure yellow (sandstone in most legends) has a luma of ~226, so a luma threshold
+    alone sees only its dots and reads the swatch as a scatter of specks.
+    """
+    px = rgb.astype(np.int16)
+    chroma = px.max(axis=2) - px.min(axis=2)
+    return (gray < 200) | (chroma > 40)
+
+
+def _swatch_candidates(
+    gray: np.ndarray, words: list[_Word], min_px: int, content: np.ndarray | None = None
+) -> list[Box]:
     """Graphic blobs that are not text.
 
     Long ruled lines (frames, separators) are removed first so swatches touching them stay separate. A small
@@ -302,7 +445,7 @@ def _swatch_candidates(gray: np.ndarray, words: list[_Word], min_px: int) -> lis
     confident word-like OCR boxes cover most of it. Boxes nested inside a larger candidate are dropped.
     """
     H, W = gray.shape
-    ink = (gray < 200).astype(np.uint8)
+    ink = (content if content is not None else gray < 200).astype(np.uint8)
     # Rules are often anti-aliased grey, so find them with a lighter threshold than the ink itself.
     faint = (gray < 235).astype(np.uint8)
     hl = cv2.morphologyEx(faint, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, W // 4), 1)))
@@ -412,6 +555,120 @@ def _assign(swatches: list[Box], phrases: list[_Phrase], layout: str, th: float,
     return out
 
 
+def _typical(boxes: list[Box]) -> tuple[float, float] | None:
+    """Typical swatch size of a legend: median of the boxes that are not fragments (>= 60% of the 75th percentile)."""
+    if len(boxes) < 3:
+        return None
+    rw = float(np.percentile([b.width for b in boxes], 75))
+    rh = float(np.percentile([b.height for b in boxes], 75))
+    full = [b for b in boxes if b.width >= 0.6 * rw and b.height >= 0.6 * rh]
+    if len(full) < 3:
+        return None
+    return float(np.median([b.width for b in full])), float(np.median([b.height for b in full]))
+
+
+def _is_typical(b: Box, mw: float, mh: float) -> bool:
+    return 0.8 * mw <= b.width <= 1.25 * mw and 0.8 * mh <= b.height <= 1.25 * mh
+
+
+def _regularise(
+    swatches: list[Box],
+    chains: list[list[int]],
+    phrases: list[_Phrase],
+    layout: str,
+    content: np.ndarray,
+    text_mask: np.ndarray,
+) -> list[Box]:
+    """Repair swatch boxes using the legend's own regular layout.
+
+    Legend swatches share one size, line up in columns (rows, for labels under the swatch) and sit at one offset
+    from their labels. All three are learnt from the swatches that were read cleanly. A sparse pattern on white
+    ("^ ^ ^", "X X X") or a light fill falls apart into specks; for every label whose swatch is such a fragment, or
+    is missing, a swatch of the typical size is placed at the typical offset, snapped to the nearest column, and
+    kept only if that spot holds a drawing (ink or colour) rather than paper or text. Each label is anchored on its
+    first word that lies outside the swatch, so pattern glyphs read as text ("Yy", "FO") do not shift it. Fragments
+    are dropped. Legends without a regular layout are returned as read.
+    """
+    labelled = [(sw, c) for sw, c in zip(swatches, chains, strict=True) if c]
+    # size from rock swatches when there are enough: some legends are mostly small drilling-symbol icons
+    rocks = [
+        sw for sw, c in labelled if any(w.lower() in ROCK_WORDS for w in re.findall(r"[A-Za-z]+", phrases[c[0]].text))
+    ]
+    size = _typical(rocks) or _typical([sw for sw, _ in labelled])
+    if size is None:
+        return swatches
+    mw, mh = size
+    good = [(sw, c) for sw, c in labelled if _is_typical(sw, mw, mh)]
+    if len(good) < 3:
+        return swatches
+    right = layout == "right"
+
+    def fragment(b: Box) -> bool:
+        return b.width < 0.8 * mw or b.height < 0.8 * mh
+
+    def stacked(b: Box, chain: list[int]) -> bool:
+        """Two neighbouring swatches fused into one box, each with its own label line."""
+        rows = {round(((phrases[j].y0 + phrases[j].y1) / 2) / max(mh, 1)) for j in chain}
+        cols = {round(((phrases[j].x0 + phrases[j].x1) / 2) / max(mw, 1)) for j in chain}
+        return (b.height >= 1.8 * mh and len(rows) > 1) if right else (b.width >= 1.8 * mw and len(cols) > 1)
+
+    if right:
+        gap = float(np.median([phrases[c[0]].x0 - sw.x1 for sw, c in good]))
+        off = float(np.median([(phrases[c[0]].y0 + phrases[c[0]].y1) / 2 - (sw.y0 + sw.y1) / 2 for sw, c in good]))
+        lanes = sorted(sw.x0 for sw in swatches if not fragment(sw))
+    else:
+        gap = float(np.median([phrases[c[0]].y0 - sw.y1 for sw, c in good]))
+        off = float(np.median([(phrases[c[0]].x0 + phrases[c[0]].x1) / 2 - (sw.x0 + sw.x1) / 2 for sw, c in good]))
+        lanes = sorted(sw.y0 for sw in swatches if not fragment(sw))
+    H, W = content.shape
+
+    def snap(v: float, unit: float) -> float | None:
+        near = min(lanes, key=lambda q: abs(q - v))
+        return float(near) if abs(near - v) <= 0.5 * unit else None
+
+    def drawn(b: Box) -> bool:
+        my, mx = max(1, b.height // 6), max(1, b.width // 6)
+        inner = (slice(b.y0 + my, b.y1 - my), slice(b.x0 + mx, b.x1 - mx))
+        return content[inner].mean() > 0.02 and text_mask[inner].mean() < 0.3
+
+    def anchored(p: _Phrase) -> Box | None:
+        """Swatch for a label: try each word as the label's start until the swatch fits left of (above) it."""
+        for w in p.words or [_Word(p.text, p.x0, p.y0, p.x1, p.y1, p.conf)]:
+            if right:
+                x0 = snap(w.x0 - gap - mw, mw)
+                if x0 is None:
+                    continue
+                cy = (p.y0 + p.y1) / 2 - off
+                b = (x0, cy - mh / 2, x0 + mw, cy + mh / 2)
+                if b[2] > w.x0 + 2:
+                    continue
+            else:
+                y0 = snap(p.y0 - gap - mh, mh)
+                if y0 is None:
+                    return None
+                cx = (p.x0 + p.x1) / 2 - off
+                b = (cx - mw / 2, y0, cx + mw / 2, y0 + mh)
+            x0, y0, x1, y1 = (int(round(v)) for v in b)
+            if x0 < 0 or y0 < 0 or x1 > W or y1 > H:
+                continue
+            box = Box(x0, y0, x1, y1)
+            return box if drawn(box) else None
+        return None
+
+    out = [
+        sw
+        for sw, c in zip(swatches, chains, strict=True)
+        if (c and not fragment(sw) and not stacked(sw, c)) or (not c and _is_typical(sw, mw, mh))
+    ]
+    for p in phrases:
+        if len(re.sub(r"[^A-Za-z]", "", p.text)) < 3:
+            continue
+        b = anchored(p)
+        if b is not None and not any(b.iou(o) > 0.3 for o in out):
+            out.append(b)
+    return sorted(out, key=lambda b: (b.y0, b.x0))
+
+
 def _reread_label(
     gray: np.ndarray, s: Box, swatches: list[Box], layout: str, th: float, upscale: float, min_conf: float
 ) -> tuple[str, float]:
@@ -447,7 +704,8 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
     words = _ocr_words(gray, upscale, cfg.ocr_min_conf)
     if dpi <= 250:  # small text: a second zoom level reads labels the first one misses
         words = _merge_words(words, _ocr_words(gray, 3.0 - upscale, cfg.ocr_min_conf))
-    swatches, glued = _split_glued(_swatch_candidates(gray, words, cfg.min_swatch_px), gray)
+    content = _content_mask(rgb, gray)
+    swatches, glued = _split_glued(_swatch_candidates(gray, words, cfg.min_swatch_px, content), gray)
 
     def in_swatch(w: _Word) -> bool:
         cx, cy = (w.x0 + w.x1) / 2, w.cy
@@ -461,14 +719,36 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
     n_right = sum(bool(c) for c in found["right"])
     n_below = sum(bool(c) for c in found["below"])
     layout = "right" if n_right >= n_below else "below"
+    text_mask = np.zeros(gray.shape, bool)  # label text: known words, or very confident OCR (not pattern glyphs)
+    for w in words:
+        known = any(correct_word(t).lower() in _KNOWN_WORDS for t in re.findall(r"[A-Za-z]+", w.text))
+        if _is_wordlike(w) and (known or w.conf >= 85):
+            text_mask[w.y0 : w.y1, w.x0 : w.x1] = True
+    repaired = _regularise(swatches, found[layout], phrases, layout, content, text_mask)
+    if repaired != swatches:  # pair labels again: text read inside a repaired swatch is pattern, not label
+        glued = {repaired.index(swatches[i]) for i in glued if swatches[i] in repaired}
+        swatches = repaired
+        words = [w for w in words if not in_swatch(w)]
+        phrases = _phrases(words)
+        found[layout] = _assign(swatches, phrases, layout, th, max_gap)
+    chains = found[layout]
+    gaps = [
+        (phrases[c[0]].x0 - s.x1) if layout == "right" else (phrases[c[0]].y0 - s.y1)
+        for s, c in zip(swatches, chains, strict=True)
+        if c
+    ]
+    usual_gap = float(np.median(gaps)) if gaps else 0.0
     entries = []
-    for s, chain in sorted(zip(swatches, found[layout], strict=True), key=lambda sc: (sc[0].y0, sc[0].x0)):
+    for s, chain in zip(swatches, chains, strict=True):
         if chain:
             text = " ".join(phrases[j].text for j in chain)
             conf = float(np.mean([phrases[j].conf for j in chain]))
-            # labels under swatches wrap onto two lines, and labels glued to a swatch lose their first letters:
-            # in both cases page OCR can miss part of the label, so re-read its strip and keep the fuller reading
-            if layout == "below" or (swatches.index(s) in glued and _fragmentary(text)):
+            first_gap = (phrases[chain[0]].x0 - s.x1) if layout == "right" else (phrases[chain[0]].y0 - s.y1)
+            # labels under swatches wrap onto two lines, labels glued to a swatch lose their first letters, and a
+            # label starting far from its swatch lost its first word(s): page OCR missed part of the label, so
+            # re-read its strip and keep the fuller reading
+            far = layout == "right" and first_gap > usual_gap + 2 * th
+            if layout == "below" or far or (swatches.index(s) in glued and _fragmentary(text)):
                 rr, rr_conf = _reread_label(gray, s, swatches, layout, th, upscale, cfg.ocr_min_conf)
                 first = clean_label(text).split()[:1]
                 if (
@@ -490,7 +770,7 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
                 label=label,
                 swatch=Box(s.x0 + origin[0], s.y0 + origin[1], s.x1 + origin[0], s.y1 + origin[1]),
                 ocr_confidence=conf,
-                is_rock=is_rock_type(label),
+                is_rock=is_rock_type(label, rgb[s.y0 : s.y1, s.x0 : s.x1]),
             )
         )
     log.debug(
