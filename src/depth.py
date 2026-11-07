@@ -1,7 +1,6 @@
 import time
 import numpy as np
 import pytesseract
-from sklearn.linear_model import RANSACRegressor, LinearRegression
 from src.data import load_crops
 from PIL import Image
 
@@ -53,14 +52,30 @@ def read_labels(depth_crop, y_offset, chunk=4000, overlap=400):
     return pts
 
 
-def fit_depth(pts, tol_ft=20):
-    """Robust linear fit page_y -> depth. Returns (a, b, n_inliers)."""
+def fit_depth(pts, tol_ft=20, iters=500, seed=0):
+    """Robust linear fit page_y -> depth (RANSAC, numpy only). Returns (a, b, n_inliers)."""
     if len(pts) < 3:
         raise ValueError(f"only {len(pts)} depth labels read by OCR")
-    y = np.array([p[0] for p in pts]).reshape(-1, 1)
+    y = np.array([p[0] for p in pts], dtype=float)
     v = np.array([p[1] for p in pts], dtype=float)
-    m = RANSACRegressor(LinearRegression(), residual_threshold=tol_ft).fit(y, v)
-    return m.estimator_.coef_[0], m.estimator_.intercept_, int(m.inlier_mask_.sum())
+    rng = np.random.default_rng(seed)
+    best = None
+    for _ in range(iters):
+        i, j = rng.choice(len(y), 2, replace=False)
+        if y[i] == y[j]:
+            continue
+        a = (v[j] - v[i]) / (y[j] - y[i])
+        if a <= 0:                      # depth must increase downwards
+            continue
+        inl = np.abs(a * y + v[i] - a * y[i] - v) < tol_ft
+        if best is None or inl.sum() > best.sum():
+            best = inl
+    if best is None or best.sum() < 3:
+        raise ValueError("no consistent depth scale found")
+    a, b = np.polyfit(y[best], v[best], 1)
+    inl = np.abs(a * y + b - v) < tol_ft          # refine once on the fitted line
+    a, b = np.polyfit(y[inl], v[inl], 1)
+    return float(a), float(b), int(inl.sum())
 
 
 def depth_mapping(ann, crops):

@@ -10,3 +10,9 @@ example_notebook.ipynb
 .DS_Store
 .ipynb_checkpoints/
 __pycache__/
+
+# Local env and generated outputs (keep hand-labelled ground truth CSVs)
+.venv/
+outputs/*
+!outputs/gt/
+outputs/gt/*.png
