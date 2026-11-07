@@ -216,4 +216,5 @@ class Jobs:
         }
 
     def shutdown(self) -> None:
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        # wait=True: with max_tasks_per_child, a non-waiting shutdown races the pool's manager thread (Python 3.12)
+        self.pool.shutdown(wait=True, cancel_futures=True)
