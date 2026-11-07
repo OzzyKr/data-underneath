@@ -1,0 +1,12 @@
+# Data (keep the folder, ignore contents)
+dataset/*
+!dataset/.gitkeep
+
+# Local examples
+example/
+example_notebook.ipynb
+
+# OS / editor
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
