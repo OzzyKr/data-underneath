@@ -325,6 +325,53 @@ def cmd_labels_import(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def cmd_dash_build(a: argparse.Namespace) -> int:
+    from lithology.dash.paths import Paths
+    from lithology.dash.store import build
+
+    cfg = load_config(Path(a.config) if a.config else None)
+    t0 = time.perf_counter()
+    meta = build(
+        Paths(),
+        include_holdout=a.all,
+        tiles=not a.no_tiles,
+        rebuild_tiles=a.rebuild_tiles,
+        workers=a.workers,
+        unresolved_label=cfg.naming.unresolved_label,
+    )
+    log.info(
+        "dashboard data: %d logs (%s) in %.1fs",
+        meta["logs"],
+        "holdout included" if a.all else f"{meta['holdout_hidden']} holdout logs hidden",
+        time.perf_counter() - t0,
+    )
+    return 0 if meta["logs"] else 1
+
+
+def cmd_dash(a: argparse.Namespace) -> int:
+    import uvicorn
+
+    from lithology.dash.paths import Paths
+
+    if not Paths().db.exists():
+        log.error("no dashboard data yet: run `lith dash-build` first")
+        return 2
+    if not a.dev and not (Paths().dist / "index.html").exists():
+        log.error("front end not built: run `cd dashboard && npm install && npm run build` (or use --dev)")
+        return 2
+    url = f"http://{a.host}:{a.port}"
+    log.info("dashboard on %s", url if not a.dev else f"{url} (API only; open the Vite dev server)")
+    if a.open and not a.dev:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    uvicorn.run(
+        "lithology.dash.app:create_app", factory=True, host=a.host, port=a.port, reload=a.dev, log_level="warning"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lith", description="Lithology interval extraction from well-log scans")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -364,6 +411,21 @@ def main(argv: list[str] | None = None) -> int:
     li.add_argument("--kit", default="labels/kit")
     li.add_argument("--labels", default="labels")
     li.set_defaults(fn=cmd_labels_import)
+
+    db = sub.add_parser("dash-build", help="build the dashboard database and scan tiles from out/")
+    db.add_argument("--all", action="store_true", help="include holdout logs (for the final demo only)")
+    db.add_argument("--no-tiles", action="store_true", help="skip scan tiles (data only)")
+    db.add_argument("--rebuild-tiles", action="store_true", help="re-cut tiles that already exist")
+    db.add_argument("--workers", type=int, default=2)
+    db.add_argument("--config")
+    db.set_defaults(fn=cmd_dash_build)
+
+    ds = sub.add_parser("dash", help="serve the dashboard")
+    ds.add_argument("--host", default="127.0.0.1")
+    ds.add_argument("--port", type=int, default=8000)
+    ds.add_argument("--dev", action="store_true", help="API only with auto-reload (front end via `npm run dev`)")
+    ds.add_argument("--open", action="store_true", help="open the browser")
+    ds.set_defaults(fn=cmd_dash)
 
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(levelname)s %(message)s")

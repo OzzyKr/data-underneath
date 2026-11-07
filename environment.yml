@@ -24,6 +24,7 @@ dependencies:
   - fastapi>=0.115
   - uvicorn>=0.30
   - python-dotenv>=1.0
+  - python-multipart>=0.0.9
   # dev tooling
   - pytest>=8
   - ruff>=0.6
@@ -31,4 +32,6 @@ dependencies:
       - opencv-python-headless>=4.10
       - ruptures>=1.1.9
       - pytesseract>=0.3.13
+      - anthropic>=2.6         # Insights AI (any one provider is enough)
+      - openai>=1.90
       - -e .

@@ -23,7 +23,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = ["duckdb>=1.1", "fastapi>=0.115", "uvicorn>=0.30", "python-dotenv>=1.0"]
+api = [
+  "duckdb>=1.1", "fastapi>=0.115", "uvicorn>=0.30", "python-dotenv>=1.0", "python-multipart>=0.0.9",
+  "anthropic>=2.6", "openai>=1.90",
+]
 ai = ["torch>=2.4", "torchvision>=0.19"]  # tier 2 second opinion; without it the pipeline runs classical-only
 dev = ["pytest>=8", "ruff>=0.6"]
 
