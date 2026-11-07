@@ -124,5 +124,23 @@
     "column_y0": 2699,
     "column_y1": 36050,
     "draft_sha256": ""
+  },
+  {
+    "key": "08_bw_log04",
+    "doc_id": "0000000009_d-582_0000020435-0001_log04_fe_5in_md",
+    "split": "dev",
+    "window_top_ft": 24949.9,
+    "window_bottom_ft": 25149.9,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      24731.074965300777,
+      24780.995175650653
+    ],
+    "column_y0": 4384,
+    "column_y1": 12184,
+    "draft_sha256": "c3fa0871fffe106c58c30751a96fc5aac1f7fb716f3cff79fe6c7fda320c7423"
   }
 ]

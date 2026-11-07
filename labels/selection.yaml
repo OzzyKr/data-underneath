@@ -12,3 +12,6 @@ documents:
   - {key: 05_shell, prefix: "Shell_AC0336", split: holdout}
   - {key: 06_xom, prefix: "60812401020000_xom", split: holdout}
   - {key: 07_neptune, prefix: "60818400650000_at0574", split: holdout}
+  # Black-and-white: the only other labelled one is the organisers' example (log06). All 9 black-and-white logs
+  # come from one well, so none can be an honest holdout; this one is a second dev measurement.
+  - {key: 08_bw_log04, prefix: "0000000009_d-582_0000020435-0001_log04_fe_5in_md", split: dev}
