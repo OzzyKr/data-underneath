@@ -147,8 +147,9 @@ def test_read_legend_pairs_swatches_with_labels(layout, cfg):
     doc = make_document([(50, "Shale")], legend_layout=layout)
     lg = Box.from_seq(doc.annotation["bounding_boxes"]["lithology_legend"])
     entries = read_legend(crop_rgb(doc.image, lg), (lg.x0, lg.y0), 200.0, cfg.legend)
-    labels = {e.label for e in entries}
-    assert labels == set(doc.legend_names), labels
+    # Case-insensitive: names are compared that way downstream, and OCR versions differ on capital letters.
+    labels = {e.label.lower() for e in entries}
+    assert labels == {n.lower() for n in doc.legend_names}, labels
 
 
 # ---------------------------------------------------------------- evaluation + outputs
