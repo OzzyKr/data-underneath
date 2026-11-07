@@ -329,9 +329,9 @@ legend: one row per legend entry read from a log.
 wells: one row per well. Use it to find a well by any of its names (a well's logs can have other titles, e.g. well
   'G16786' also has logs titled 'MDN-1 ...'; search other_names with ILIKE) and to count wells.
   well (= logs.well_group), other_names, n_logs, log_titles, depth_refs, top_ft, bottom_ft, kind.
-salt: one row per WELL that crosses a salt body of 100 ft or more, already computed from the beds. ALWAYS use this
-  table for questions about salt (where it starts or ends, how thick, what lies below) instead of summing salt beds,
-  and build salt charts from it (it never repeats a well).
+salt: one row per WELL that crosses a salt body (100 ft or more, at least 80% salt), computed from the beds.
+  ALWAYS use this table for questions about salt (where it starts or ends, how thick, what lies below) instead of
+  summing salt beds, and build salt charts from it (it never repeats a well).
   well, log_title (the log the row was read from), depth_ref ('MD' measured along the hole or 'TVD' true vertical
   depth), salt_top_ft, top_seen (FALSE = the log starts inside the salt, so salt_top_ft is only where the log begins
   and the real top is higher: say "at least" for the thickness and never call it the top of salt), salt_base_ft (base

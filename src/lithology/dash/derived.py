@@ -18,6 +18,7 @@ import pandas as pd
 MERGE_GAP_FT = 50.0  # non-salt gaps up to this thick are inclusions inside one salt body
 MIXED_ZONE_FT = 500.0  # salt beds within this distance below the base form the "mixed zone", not the body
 MIN_BODY_FT = 100.0  # thinner salt is a stringer, not a body
+MIN_SALT_FRACTION = 0.8  # a body is massive salt; thin salt beds interbedded with other rock are not a salt body
 TOP_SEEN_WINDOW_FT = 100.0  # the top of salt is "seen" only if the log shows other rock just above it:
 TOP_SEEN_MIN_FT = 15.0  # at least this much non-salt rock within TOP_SEEN_WINDOW_FT above the body top
 
@@ -67,7 +68,7 @@ def salt_table(logs: pd.DataFrame, intervals: pd.DataFrame) -> pd.DataFrame:
         salt = d[d["rock_family"] == "Salt"]
         if salt.empty:
             continue
-        bodies = [b for b in _bodies(salt) if b[1] - b[0] >= MIN_BODY_FT]
+        bodies = [b for b in _bodies(salt) if b[1] - b[0] >= MIN_BODY_FT and b[2] >= MIN_SALT_FRACTION * (b[1] - b[0])]
         if not bodies:
             continue
         top, base, salt_ft = max(bodies, key=lambda b: b[1] - b[0])

@@ -50,3 +50,10 @@ def test_one_main_log_per_well_and_well_aliases():
     assert s.main_log.sum() == 1 and s[s.main_log].log_title.item() == "MDN-1 ST00"
     w = wells_table(logs).iloc[0]
     assert w.n_logs == 2 and "MDN-1 ST00" in w.other_names
+
+
+def test_interbedded_salt_is_not_a_body():
+    logs = _logs(("a", "Well A", "A", "MD", 0, 0, "colour"))
+    beds = _beds("a", [(1000, 1020, "Salt"), (1020, 1060, "Sand"), (1060, 1080, "Salt"), (1080, 1120, "Silt")] * 1)
+    beds = pd.concat([beds, _beds("a", [(1120, 1140, "Salt"), (1140, 1180, "Sand"), (1180, 1200, "Salt")])])
+    assert salt_table(logs, beds).empty
