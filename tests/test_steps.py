@@ -185,3 +185,28 @@ def test_csv_roundtrip_and_render(tmp_path, synth_doc):
 
     view = render_annotated(synth_doc.image, DocumentBoxes.from_dict(synth_doc.annotation["bounding_boxes"]), ivs)
     assert view.width > 0 and view.height > 0
+
+
+@pytest.mark.parametrize(
+    ("label", "rock"),
+    [
+        ("Mud loss", False),
+        ("Gas Good", False),
+        ("DRILLING SYMBOL", False),
+        ("Argillaceous", False),
+        ("Sandy", False),
+        ("Casing shoe", False),
+        ("Silty Sandstone", True),
+        ("Sand and Sandstone", True),
+        ("Clay-S", True),
+        ("SALT", True),
+        ("Limestone", True),
+        ("Others-H", True),
+        ("rite", False),
+        ("fio", False),
+    ],
+)
+def test_drilling_symbols_and_modifiers_are_not_rock_types(label, rock):
+    from lithology.legend import is_rock_type
+
+    assert is_rock_type(label) is rock

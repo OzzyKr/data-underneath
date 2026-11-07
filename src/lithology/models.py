@@ -159,6 +159,7 @@ class LegendEntry:
     label: str
     swatch: Box  # full-image pixels
     ocr_confidence: float = 0.0
+    is_rock: bool = True  # False for drilling/show symbols and modifier words (never used to name intervals)
 
 
 @dataclass

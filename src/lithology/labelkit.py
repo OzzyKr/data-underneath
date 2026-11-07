@@ -35,6 +35,19 @@ class KitItem:
     knots_depth: list[float]
     column_y0: int
     column_y1: int
+    draft_sha256: str = ""  # hash of the draft CSV as generated; a different file means the person edited it
+
+
+def file_sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
+
+
+def is_edited(item: KitItem, out_dir: Path) -> bool:
+    """True when the person changed the draft CSV since it was generated (or its hash was never recorded)."""
+    current = file_sha256(out_dir / f"{item.key}.csv")
+    return bool(current) and current != item.draft_sha256
 
 
 def choose_window(intervals: list[Interval], window_ft: float) -> tuple[float, float]:
@@ -138,7 +151,18 @@ def make_item(
         w = csv.DictWriter(f, fieldnames=KIT_COLUMNS)
         w.writeheader()
         w.writerows(rows)
-    return KitItem(key, doc.doc_id, split, round(top_ft, 1), round(bot_ft, 1), knots_y, knots_d, lc.y0, lc.y1)
+    return KitItem(
+        key,
+        doc.doc_id,
+        split,
+        round(top_ft, 1),
+        round(bot_ft, 1),
+        knots_y,
+        knots_d,
+        lc.y0,
+        lc.y1,
+        file_sha256(out_dir / f"{key}.csv"),
+    )
 
 
 def save_manifest(items: list[KitItem], out_dir: Path) -> None:

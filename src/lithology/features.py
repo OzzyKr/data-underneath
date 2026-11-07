@@ -175,9 +175,10 @@ MATCH_NAMES: tuple[str, ...] = (
     "skel_v",
     "skel_d",
 )
-# Fixed scales for column-vs-legend matching: ~10 Lab units is a clearly different colour; texture terms are
+# Fixed scales for column-vs-legend matching: column and legend share their background colour exactly, so
+# 4 Lab units of background difference already counts as much as a large texture difference; texture terms are
 # fractions. Fixed (not learned) so the matcher has nothing to overfit.
-MATCH_SCALE = np.array([10, 10, 10, 15, 15, 15, 0.02, 0.15, 0.15, 0.15])
+MATCH_SCALE = np.array([4, 4, 4, 15, 15, 15, 0.02, 0.15, 0.15, 0.15])
 
 
 def match_descriptor(rgb: np.ndarray, ink_luma: int) -> np.ndarray:

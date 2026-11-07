@@ -6,12 +6,16 @@ Dolomite
 Glauconite
 Kaolinite
 Limestone
+Marlstone
 Marly
 Not Available
 Pyrite
+Salt
 Sample
 Sandstone
 Sandy
+Shale
 Siliceous
 Siltstone
+annyarite
 rite

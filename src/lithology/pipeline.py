@@ -114,16 +114,29 @@ def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: Docum
         res.legend = entries
         names: dict[int, str] = {}
         match_conf: dict[int, float] = {}
-        if entries and len(ids):
+        rocks = [e for e in entries if e.is_rock] or entries  # never name a bed after a drilling symbol
+        if rocks and len(ids):
+            entries = rocks
             sw = np.array([swatch_descriptor(crop_rgb(img, e.swatch), cfg.segment.ink_luma) for e in entries])
             n_clusters = int(ids.max()) + 1
             cdesc = np.array(
                 [_cluster_match_descriptor(column, filled, ids, c, seg.block_px, cfg) for c in range(n_clusters)]
             )
+            swatch_of: dict[int, int] = {}
             for c, m in enumerate(match_clusters(cdesc, sw)):
+                swatch_of[c] = m.swatch
                 names[c] = entries[m.swatch].label
                 # certain when the winner is close and clearly ahead of the runner-up
                 match_conf[c] = float(math.exp(-m.distance / 4.0) * (1 - math.exp(-m.margin)))
+            # Groups the legend calls the same rock are one group: renumber by matched swatch (first appearance),
+            # so cluster ids agree with names and touching intervals of the same rock merge.
+            new_id: dict[int, int] = {}
+            for sw_i in (swatch_of[int(c)] for c in ids):
+                new_id.setdefault(sw_i, len(new_id))
+            remap = {c: new_id[swatch_of[c]] for c in swatch_of}
+            names = {remap[c]: n for c, n in names.items()}
+            match_conf = {remap[c]: min(v for k, v in match_conf.items() if remap[k] == remap[c]) for c in match_conf}
+            ids = np.array([remap[int(c)] for c in ids])
         else:
             res.warnings.append("no legend entries read; intervals named by cluster")
         del column

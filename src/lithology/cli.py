@@ -266,7 +266,7 @@ def cmd_check_data(a: argparse.Namespace) -> int:
 
 
 def cmd_labels_make(a: argparse.Namespace) -> int:
-    from lithology.labelkit import make_item, save_manifest
+    from lithology.labelkit import is_edited, make_item, save_manifest
 
     cfg = load_config(Path(a.config) if a.config else None)
     sel = yaml.safe_load(Path(a.selection).read_text())["documents"]
@@ -293,6 +293,12 @@ def cmd_labels_make(a: argparse.Namespace) -> int:
             log.error("no document matches prefix %r", s["prefix"])
             return 2
         old = existing.get(s["key"])
+        if old and is_edited(old, out) and not a.force:
+            log.error(
+                "%s.csv has edits (or predates edit tracking); not overwriting it. Use --force to replace.", s["key"]
+            )
+            items.append(old)
+            continue
         window = (old.window_top_ft, old.window_bottom_ft) if old else None  # keep a window already shown
         item = make_item(doc, s["key"], s["split"], cfg, out, window=window)
         log.info(
@@ -351,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     lm.add_argument("--out", default="labels/kit")
     lm.add_argument("--config")
     lm.add_argument("--only", help="comma-separated kit keys to rebuild (others are left untouched)")
+    lm.add_argument("--force", action="store_true", help="overwrite draft CSVs even if they were edited")
     lm.set_defaults(fn=cmd_labels_make)
 
     li = sub.add_parser("labels-import", help="turn corrected kit CSVs into label files")

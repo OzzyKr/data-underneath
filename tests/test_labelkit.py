@@ -56,3 +56,13 @@ def test_choose_window_prefers_variety():
     top, bottom = choose_window(ivs, 40.0)
     inside = {iv.cluster_id for iv in ivs if iv.bottom_depth > top and iv.top_depth < bottom}
     assert bottom - top == 40.0 and inside == {0, 1, 2}  # the window shows every rock group
+
+
+def test_edited_drafts_are_detected(tmp_path):
+    from lithology.labelkit import KitItem, file_sha256, is_edited
+
+    (tmp_path / "01_x.csv").write_text("n,top_depth\n1,1000\n")
+    item = KitItem("01_x", "doc", "dev", 0, 1, [0.0, 1.0], [0.0, 1.0], 0, 1, file_sha256(tmp_path / "01_x.csv"))
+    assert not is_edited(item, tmp_path)
+    (tmp_path / "01_x.csv").write_text("n,top_depth\n1,1001\n")  # the person corrects a depth
+    assert is_edited(item, tmp_path)

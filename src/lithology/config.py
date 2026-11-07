@@ -37,6 +37,7 @@ class SegmentConfig:
     colour_block_ft: float
     colour_min_block_px: int
     colour_min_thickness_ft: float
+    colour_min_px: int
     colour_sliver_ft: float
     colour_penalty: float
     ink_luma: int

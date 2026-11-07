@@ -192,7 +192,8 @@ def segment_column(rgb: np.ndarray, px_per_ft: float, cfg: SegmentConfig) -> Seg
     rows = _absorb_thin(stats, scaler, _dedupe(coarse, h, 2), min_px=int(round(cfg.min_thickness_ft * px_per_ft)))
 
     fblock = max(cfg.colour_min_block_px, int(round(cfg.colour_block_ft * px_per_ft)))
-    thin_px = max(2, int(round(cfg.colour_min_thickness_ft * px_per_ft)))
+    # a bed must also span a few pixel rows: below that a low-resolution log cannot resolve it
+    thin_px = max(cfg.colour_min_px, int(round(cfg.colour_min_thickness_ft * px_per_ft)))
     fstarts, fends = _block_grid(h, fblock)
     full = describe_ranges(stats, fstarts, fends)
     fdesc = _ignore_thin_lines(full[:, FILL_IDX], full[:, 6], max_blocks=max(1, thin_px // fblock))

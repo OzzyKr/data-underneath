@@ -72,6 +72,97 @@ ROCK_WORDS = [
 ]
 
 
+# Legends also list drilling/show symbols and modifier words. They are not rock types, so a column interval is
+# never named after them. A label is excluded only when *every* word in it is one of these (so "Silty Sandstone"
+# and "Sand and Sandstone" stay rocks, while "Mud loss", "Gas Good" or "Argillaceous" do not).
+SYMBOL_WORDS = set(
+    [
+        "mud",
+        "loss",
+        "gain",
+        "lost",
+        "circulation",
+        "gas",
+        "oil",
+        "and",
+        "show",
+        "survey",
+        "deviation",
+        "casing",
+        "shoe",
+        "fit",
+        "lot",
+        "test",
+        "dst",
+        "core",
+        "sidewall",
+        "dry",
+        "fresh",
+        "salted",
+        "water",
+        "bit",
+        "change",
+        "short",
+        "trip",
+        "marker",
+        "connection",
+        "background",
+        "formation",
+        "drilling",
+        "symbol",
+        "kick",
+        "flow",
+        "good",
+        "fair",
+        "poor",
+        "cut",
+        "fluorescence",
+    ]
+)
+MODIFIER_WORDS = set(
+    [
+        "sandy",
+        "silty",
+        "argillaceous",
+        "calcareous",
+        "dolomitic",
+        "carbonaceous",
+        "siliceous",
+        "marly",
+        "glauconite",
+        "glauconitic",
+        "kaolinite",
+        "kaolinitic",
+        "pyrite",
+        "pyritic",
+        "anhydritic",
+        "fossil",
+        "fossils",
+        "fossiliferous",
+        "oolitic",
+        "micaceous",
+        "cherty",
+        "ferruginous",
+        "tuffaceous",
+        "lignitic",
+    ]
+)
+
+
+def _fragmentary(text: str) -> bool:
+    """True when no word of the text is a known rock, symbol or modifier word (e.g. "rite" from "Anhydrite")."""
+    known = set(ROCK_WORDS) | SYMBOL_WORDS | MODIFIER_WORDS
+    return not any(correct_word(w).lower() in known for w in re.findall(r"[A-Za-z]{2,}", text))
+
+
+def is_rock_type(label: str) -> bool:
+    """A usable rock name: not only symbol/modifier words, and not a short unknown OCR fragment ("rite", "fio")."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
+    if not words or all(w in SYMBOL_WORDS | MODIFIER_WORDS for w in words):
+        return False
+    return any(w in ROCK_WORDS for w in words) or max(len(w) for w in words) >= 5
+
+
 @dataclass
 class _Word:
     text: str
@@ -247,6 +338,31 @@ def _swatch_candidates(gray: np.ndarray, words: list[_Word], min_px: int) -> lis
     return [a for a in boxes if not any(inside(a, b) for b in boxes)]
 
 
+def _split_glued(swatches: list[Box], gray: np.ndarray) -> tuple[list[Box], set[int]]:
+    """Trim swatches fused with an unread label printed against them.
+
+    Swatches in one legend share a size. A candidate as tall as the typical swatch but far wider, whose extra part
+    looks different from its swatch part (text on white, not more of the same pattern), is a swatch plus glued
+    text: keep its left part at the typical width (the text is then re-read). Returns (boxes, trimmed indices).
+    """
+    if len(swatches) < 4:
+        return swatches, set()
+    mw = float(np.median([b.width for b in swatches]))
+    mh = float(np.median([b.height for b in swatches]))
+    out, trimmed = [], set()
+    for i, b in enumerate(swatches):
+        cut = b.x0 + int(round(mw))
+        if b.width > 1.6 * mw and abs(b.height - mh) <= 0.2 * mh:
+            left = gray[b.y0 : b.y1, b.x0 : cut].astype(float)
+            right = gray[b.y0 : b.y1, cut : b.x1].astype(float)
+            if right.mean() - left.mean() > 40:  # extra part much lighter: text on paper, not more pattern
+                out.append(Box(b.x0, b.y0, cut, b.y1))
+                trimmed.add(i)
+                continue
+        out.append(b)
+    return out, trimmed
+
+
 def _assign(swatches: list[Box], phrases: list[_Phrase], layout: str, th: float, max_gap: float) -> list[list[int]]:
     """Give every phrase to at most one swatch: the nearest one on its left ('right' layout) or above it
     ('below' layout). Returns, per swatch, the indices of its phrases in reading order, keeping only phrases that
@@ -331,7 +447,7 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
     words = _ocr_words(gray, upscale, cfg.ocr_min_conf)
     if dpi <= 250:  # small text: a second zoom level reads labels the first one misses
         words = _merge_words(words, _ocr_words(gray, 3.0 - upscale, cfg.ocr_min_conf))
-    swatches = _swatch_candidates(gray, words, cfg.min_swatch_px)
+    swatches, glued = _split_glued(_swatch_candidates(gray, words, cfg.min_swatch_px), gray)
 
     def in_swatch(w: _Word) -> bool:
         cx, cy = (w.x0 + w.x1) / 2, w.cy
@@ -350,7 +466,9 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
         if chain:
             text = " ".join(phrases[j].text for j in chain)
             conf = float(np.mean([phrases[j].conf for j in chain]))
-            if layout == "below":  # labels under swatches wrap onto two lines that page OCR can miss
+            # labels under swatches wrap onto two lines, and labels glued to a swatch lose their first letters:
+            # in both cases page OCR can miss part of the label, so re-read its strip and keep the fuller reading
+            if layout == "below" or (swatches.index(s) in glued and _fragmentary(text)):
                 rr, rr_conf = _reread_label(gray, s, swatches, layout, th, upscale, cfg.ocr_min_conf)
                 first = clean_label(text).split()[:1]
                 if (
@@ -372,6 +490,7 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
                 label=label,
                 swatch=Box(s.x0 + origin[0], s.y0 + origin[1], s.x1 + origin[0], s.y1 + origin[1]),
                 ocr_confidence=conf,
+                is_rock=is_rock_type(label),
             )
         )
     log.debug(

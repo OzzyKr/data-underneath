@@ -24,6 +24,7 @@ segment:
   colour_block_ft: 0.25
   colour_min_block_px: 3
   colour_min_thickness_ft: 0.5  # thinnest bed reported at all (single pattern rows ~0.7 ft exist)
+  colour_min_px: 6           # ...and at least this many pixel rows (resolution floor on 1 in/100 ft logs)
   colour_sliver_ft: 1.0      # beds thinner than this are kept only between two layers of the same rock
   colour_penalty: 3.0
   ink_luma: 110              # pixels darker than this (0-255) count as pattern ink / lines
