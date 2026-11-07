@@ -1,0 +1,6 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+25000.1,25011.08,Sand and Sandstone,5389,5609,bwlog04#1,claude-vision
+25098.39,25109.37,Shale,7358,7578,bwlog04#2,claude-vision
+25128.34,25139.33,Siltstone,7958,8178,bwlog04#3,claude-vision
+25210.06,25219.84,Siltstone,9595,9791,bwlog04#5,claude-vision
+25252.54,25254.24,Shale,10446,10480,bwlog04#6,claude-vision

@@ -15,3 +15,5 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T21:15:27,b17de96-dirty,d33ac173a4ce,1ae115030da8,all,trial: snap final bed edges to blank gaps (example only),1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-07T21:20:25,b17de96-dirty,d33ac173a4ce,1ae115030da8,dev,snap final same-fill bed edges to blank gaps,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-07T21:25:39,b17de96-dirty,d33ac173a4ce,1ae115030da8,dev,snap edges + end-of-column guard,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-07T21:53:02,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,trial: colour veto + bed-level exact match,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-07T21:58:46,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,colour veto,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
