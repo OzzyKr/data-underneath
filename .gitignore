@@ -10,3 +10,18 @@ example_notebook.ipynb
 .DS_Store
 .ipynb_checkpoints/
 __pycache__/
+
+# Organiser material (large, not ours to redistribute)
+*.pptx
+
+# Outputs, caches, secrets
+out/
+data/cache/
+.env
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Stage 2 front end
+node_modules/
+dashboard/dist/

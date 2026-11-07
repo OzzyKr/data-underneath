@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lithology"
+version = "0.1.0"
+description = "Lithology interval extraction from scanned well-log images (Viridien HackTheBurgh challenge)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "pillow>=10.4",
+    "scipy>=1.13",
+    "scikit-image>=0.24",
+    "scikit-learn>=1.5",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "pyyaml>=6",
+    "opencv-python-headless>=4.10",
+    "ruptures>=1.1.9",
+    "pytesseract>=0.3.13",
+]
+
+[project.optional-dependencies]
+api = ["duckdb>=1.1", "fastapi>=0.115", "uvicorn>=0.30", "python-dotenv>=1.0"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+lith = "lithology.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lithology = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "dataset: needs the local dataset/ or example/ folder (skipped when absent)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests", "eval", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "NPY"]

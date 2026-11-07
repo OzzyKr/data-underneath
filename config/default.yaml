@@ -1,0 +1,49 @@
+# Every tunable number in the pipeline lives here, in physical units (ft) or as a fraction of a box.
+# Change values here, never in code. The config hash is recorded with every result.
+
+scale:
+  n_windows: 14              # OCR windows spread down the depth column
+  window_ft: 120             # height of each OCR window, in ft (converted with the filename/DPI estimate)
+  window_px_fallback: 1600   # window height when no scale estimate exists
+  min_text_px: 22            # upscale a crop so OCR text is at least roughly this tall
+  min_points: 4              # OCR depth labels needed before trusting a fit
+  ransac_residual_ft: 3.0    # a label further than this from the fit is an outlier
+  max_slope_disagreement: 0.15  # |px_per_ft OCR / filename-DPI - 1| above this lowers confidence
+  piecewise_break_ft: 25.0   # if a global line misses inliers by more than this, use piecewise knots
+  max_depth_ft: 45000        # deepest plausible label (the deepest wells drilled are ~40,000 ft)
+
+segment:
+  core_width_fraction: 0.6   # analyse the central part of the column, away from border lines and text
+  block_ft: 1.0              # descriptor block height
+  min_block_px: 12           # but never shorter than this (pattern periods are ~10-40 px)
+  min_thickness_ft: 2.0      # thinnest interval we report
+  penalty: 3.0               # change-point penalty (PELT, on standardised block descriptors)
+  refine_window_ft: 1.5      # boundary refinement search radius around a block edge
+  ink_luma: 110              # pixels darker than this (0-255) count as pattern ink / lines
+  blank_ink_fraction: 0.004  # a block with less ink than this AND near-white fill is blank paper
+  blank_fill_luma: 240
+
+cluster:
+  distance_threshold: 0.6    # agglomerative merge threshold (weighted RMS distance in noise units)
+  colour_weight: 2.0         # colour carries more weight than texture when both are present
+
+legend:
+  min_label_chars: 2
+  max_swatch_gap_frac: 0.06  # max gap between a swatch and its label, as a fraction of legend width
+  min_swatch_px: 8           # ignore specks smaller than this in either dimension
+  ocr_min_conf: 30
+
+checks:
+  min_thickness_ft: 1.0
+  depth_monotonic: true
+
+render:
+  max_height_px: 20000       # annotated image is shrunk so it is at most this tall
+  coverage: 0.5              # fraction of the lithology column painted with the prediction
+
+runtime:
+  workers: 2                 # documents processed in parallel (each in its own process)
+
+ai:
+  tier: 1                    # 1 = classical only; 2 = + local pretrained features; 3 = + cloud LLM
+  provider: none             # none | openai | gemini (tier 3 only)
