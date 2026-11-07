@@ -8,12 +8,11 @@ import { Dot, ErrorNote } from "../components/ui";
 import StripLog, { type Span } from "../viewer/StripLog";
 import PageView, { type Fit } from "../viewer/PageView";
 
-type View = "column" | "wide" | "page";
+type View = "column" | "page";
 
 const VIEWS: { id: View; label: string; title: string }[] = [
   { id: "column", label: "Column", title: "Lithology column" },
-  { id: "wide", label: "Full scan", title: "Full scan" },
-  { id: "page", label: "Whole page", title: "Whole page" },
+  { id: "page", label: "Original scan", title: "Original scan" },
 ];
 const SPANS: { id: Span; label: string }[] = [
   { id: 50, label: "50 ft" },
@@ -52,7 +51,8 @@ export default function ImagePage() {
   const { data: intervals } = useIntervals(logId);
   const spanParam = params.get("span");
   const span: Span = spanParam === "all" ? "all" : spanParam === "50" ? 50 : spanParam === "1000" ? 1000 : 200;
-  const view: View = params.get("view") === "wide" ? "wide" : params.get("view") === "page" ? "page" : "column";
+  const view: View = params.get("view") === "page" ? "page" : "column";
+  const spotlight = params.get("spot") !== "0";
   const fit: Fit = params.get("fit") === "page" ? "page" : "width";
   const setParam = useCallback(
     (key: string, value: string | null) =>
@@ -100,7 +100,7 @@ export default function ImagePage() {
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <span className="tabular text-[13px] text-muted">
             {view === "page"
-              ? "The scan as delivered · hover for depth, click to open the column there"
+              ? "The page as delivered, true to scale · hover for depth, click to open the column there"
               : range[0] != null && range[1] != null
                 ? `${fmt(range[0])} – ${fmt(range[1])} ft in view · ${fmt(intervals.length)} beds`
                 : `${log.title} · ${fmt(intervals.length)} beds`}
@@ -109,7 +109,18 @@ export default function ImagePage() {
         <div className="ml-auto flex flex-wrap items-center gap-2.5">
           <Segmented label="View" items={VIEWS} value={view} onChange={setView} />
           {view === "page" ? (
-            <Segmented label="Fit" items={FITS} value={fit} onChange={(f) => setParam("fit", f === "width" ? null : f)} />
+            <>
+              <Segmented label="Fit" items={FITS} value={fit} onChange={(f) => setParam("fit", f === "width" ? null : f)} />
+              <button
+                type="button"
+                aria-pressed={spotlight}
+                onClick={() => setParam("spot", spotlight ? "0" : null)}
+                title="Dim everything except the regions the pipeline reads"
+                className={`h-[38px] rounded-lg px-3 text-xs transition-colors ${spotlight ? "bg-line-2 text-ink" : "bg-panel text-muted hover:text-ink"}`}
+              >
+                Spotlight
+              </button>
+            </>
           ) : (
             <Segmented label="Feet per screen" items={SPANS} value={span} onChange={(s) => setParam("span", s === 200 ? null : String(s))} />
           )}
@@ -146,7 +157,7 @@ export default function ImagePage() {
             </p>
           ) : view === "page" ? (
             log.tiles?.page ? (
-              <PageView key={`page-${log.log_id}`} log={log} intervals={intervals} selected={selected} onSelect={select} fit={fit} focus={range} onOpen={openAt} />
+              <PageView key={`page-${log.log_id}`} log={log} intervals={intervals} selected={selected} onSelect={select} fit={fit} spotlight={spotlight} onOpen={openAt} />
             ) : (
               <p className="m-auto max-w-sm text-center text-sm text-muted">
                 No whole-page tiles yet. Run <code className="font-mono">lith dash-build --rebuild-tiles</code>.
@@ -160,14 +171,13 @@ export default function ImagePage() {
               selected={selected}
               onSelect={select}
               span={span}
-              context={view === "wide"}
               jump={jump}
               onView={onView}
             />
           )}
         </section>
 
-        <aside className="flex h-[calc(100vh-180px)] min-h-[540px] min-w-0 grow basis-[280px] flex-col gap-5 lg:max-w-[340px]">
+        <aside className={`${view === "page" ? "hidden" : "flex"} h-[calc(100vh-180px)] min-h-[540px] min-w-0 grow basis-[280px] flex-col gap-5 lg:max-w-[340px]`}>
           <SelectedBed log={log} iv={sel} count={intervals.length} onStep={(d) => sel && select(Math.min(intervals.length - 1, Math.max(0, sel.idx + d)))} />
           <BedList intervals={intervals} selected={selected} range={range} onSelect={select} />
           <LegendMatch log={log} />

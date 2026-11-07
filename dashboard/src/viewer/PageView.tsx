@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Interval, LogDetail } from "../api";
 import { fmt } from "../format";
 import { depthMapper } from "./depth";
-import { Minimap } from "./StripLog";
+import { HiddenNote, SELECT, estimatePxPerFt, labelLayers, placeLabels, rulerLayers } from "./layers";
+import { Minimap, PAD } from "./StripLog";
 
 export type Fit = "width" | "page";
 
@@ -12,28 +13,36 @@ type Props = {
   selected: number | null;
   onSelect: (idx: number) => void;
   fit: Fit;
-  focus: [number | null, number | null]; // depth range last shown in the column view
+  spotlight: boolean;
   onOpen: (depth: number) => void; // open the column view at this depth
 };
 
-const M = 32; // margin around the page
-const BOXES: { key: "depth_column" | "interpreted_lithology_column" | "lithology_legend"; label: string; color: string }[] = [
-  { key: "depth_column", label: "Depth column", color: "#E5484D" },
-  { key: "interpreted_lithology_column", label: "Lithology column", color: "#3987E5" },
-  { key: "lithology_legend", label: "Legend", color: "#E79A3C" },
+const LEFT = 20;
+const RULER = 72;
+const GAP = 34;
+const LABELS = 260;
+const BOTTOM = 24;
+
+type BoxKey = "depth_column" | "interpreted_lithology_column" | "lithology_legend";
+export const REGIONS: { key: BoxKey; name: string; role: string; color: string }[] = [
+  { key: "lithology_legend", name: "Legend", role: "rock names are read here", color: "#E79A3C" },
+  { key: "depth_column", name: "Depth column", role: "depths are read here", color: "#E5484D" },
+  { key: "interpreted_lithology_column", name: "Lithology column", role: "beds are found here", color: "#3987E5" },
 ];
 
-/** The whole scanned page, uncropped, with what the pipeline found drawn on it. */
-export default function PageView({ log, intervals, selected, onSelect, fit, focus, onOpen }: Props) {
+/** The original scan, uncropped and true to proportion, with what the pipeline read and found drawn on it. */
+export default function PageView({ log, intervals, selected, onSelect, fit, spotlight, onOpen }: Props) {
   const p = log.tiles!.page!;
   const b = log.boxes!;
   const el = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 900, h: 700 });
-  const [measured, setMeasured] = useState(false); // first scroll waits for the real viewer size
+  const [size, setSize] = useState({ w: 1100, h: 700 });
+  const [measured, setMeasured] = useState(false);
   const [top, setTop] = useState(0);
-  const [hoverY, setHoverY] = useState<number | null>(null); // image row under the mouse
-  const placed = useRef<string | null>(null);
+  const [hoverY, setHoverY] = useState<number | null>(null);
+  const [hoverBedIdx, setHoverBedIdx] = useState<number | null>(null);
+  const placed0 = useRef<string | null>(null);
   const map = useMemo(() => depthMapper(intervals), [intervals]);
+  const pxPerFt = useMemo(() => estimatePxPerFt(log, intervals), [log, intervals]);
 
   useLayoutEffect(() => {
     const node = el.current;
@@ -45,19 +54,22 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
     return () => ro.disconnect();
   }, []);
 
-  const [imgW, imgH] = p.image;
-  const byWidth = (size.w - 2 * M) / p.w;
-  const d = fit === "width" ? byWidth : Math.min(byWidth, (size.h - 2 * M) / p.h);
+  // ---------------------------------------------------------------- geometry (the page keeps its proportions)
+  const imgH = p.image[1];
+  const availW = Math.max(240, size.w - LEFT - RULER - GAP - LABELS - 16);
+  const byWidth = availW / p.w;
+  const d = fit === "width" ? byWidth : Math.min(byWidth, (size.h - PAD - BOTTOM) / p.h);
   const s = p.scale * d; // screen px per image px
   const W = p.w * d;
   const H = p.h * d;
-  const left = Math.max(M, (size.w - W) / 2);
-  const X = (x: number) => left + x * s;
-  const Y = (y: number) => M + y * s;
-
+  const xPage = LEFT + RULER;
+  const xLabel = xPage + W + GAP;
+  const CW = Math.max(size.w, xLabel + LABELS + 20);
+  const CH = PAD + H + BOTTOM;
+  const X = (x: number) => xPage + x * s;
+  const Y = useCallback((y: number) => PAD + y * s, [s]);
+  const imgY = useCallback((sc: number) => (sc - PAD) / s, [s]);
   const lc = b.interpreted_lithology_column;
-  const focusY0 = focus[0] != null ? map.yAt(focus[0]) : null;
-  const focusY1 = focus[1] != null ? map.yAt(focus[1]) : null;
 
   const scrollTo = (screenY: number) => {
     const node = el.current;
@@ -66,22 +78,21 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
     setTop(node.scrollTop);
   };
 
-  // open on the part last seen in the column view (or the selected bed)
+  // open on the selected bed, else at the top of the page
   useLayoutEffect(() => {
-    if (!measured || placed.current === `${log.log_id}:${fit}` || size.h < 100) return;
-    placed.current = `${log.log_id}:${fit}`;
+    if (!measured || placed0.current === `${log.log_id}:${fit}` || size.h < 100) return;
+    placed0.current = `${log.log_id}:${fit}`;
     const sel = intervals.find((r) => r.idx === selected);
-    const y = focusY0 != null && focusY1 != null ? (focusY0 + focusY1) / 2 : sel ? (sel.top_y + sel.bottom_y) / 2 : null;
-    scrollTo(y != null ? Y(y) - size.h / 2 : 0);
+    scrollTo(sel ? Y((sel.top_y + sel.bottom_y) / 2) - size.h / 2 : 0);
   }, [log.log_id, fit, size.h, measured]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const node = el.current;
     const iv = intervals.find((r) => r.idx === selected);
-    if (!node || !iv || placed.current == null) return;
+    if (!node || !iv || placed0.current == null) return;
     const a = Y(iv.top_y);
     const c = Y(iv.bottom_y);
-    if (a < node.scrollTop + 20 || c > node.scrollTop + node.clientHeight - 20) scrollTo((a + c) / 2 - node.clientHeight / 2);
+    if (a < node.scrollTop + 40 || c > node.scrollTop + node.clientHeight - 20) scrollTo((a + c) / 2 - node.clientHeight / 2);
   }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const frame = useRef(0);
@@ -95,6 +106,7 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
   const layers: ReactNode[] = [];
 
   // the page
+  layers.push(<div key="paper" className="absolute shadow-2xl shadow-black/60" style={{ left: xPage, top: PAD, width: W, height: H, background: "#FBFBF9" }} />);
   const tileImgH = p.tile_h / p.scale;
   for (let i = 0; i < p.n; i++) {
     const a = i * tileImgH;
@@ -107,100 +119,133 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
         alt=""
         draggable={false}
         className="absolute max-w-none select-none"
-        style={{ left, top: Y(a), width: W, height: Math.max(1, (c - a) * s) }}
+        style={{ left: xPage, top: Y(a), width: W, height: Math.max(1, (c - a) * s) }}
       />,
     );
   }
 
-  // predicted beds on the left half of the lithology column (the organisers' style)
-  for (const r of intervals) {
+  // spotlight: dim the page except the three regions the pipeline reads
+  if (spotlight) {
+    const hole = (k: BoxKey) => {
+      const [x0, y0, x1, y1] = b[k];
+      const w = (x1 - x0) * s + 6;
+      const h = (y1 - y0) * s + 6;
+      return `M${X(x0) - 3},${Y(y0) - 3} h${w} v${h} h${-w} Z`;
+    };
+    const page = `M${xPage},${PAD} h${W} v${H} h${-W} Z`;
+    layers.push(
+      <svg key="spot" className="pointer-events-none absolute left-0 top-0" width={CW} height={CH} aria-hidden="true">
+        <path d={[page, ...REGIONS.map((r) => hole(r.key))].join(" ")} fillRule="evenodd" fill="rgba(14,16,20,0.62)" />
+      </svg>,
+    );
+  }
+
+  // predicted beds on the lithology column, with their boundaries
+  const vis = intervals.filter((r) => Y(r.bottom_y) >= lo && Y(r.top_y) <= hi);
+  let lastBoundary = -Infinity;
+  const lcW = (lc[2] - lc[0]) * s;
+  for (const r of vis) {
     const a = Y(r.top_y);
-    const c = Y(r.bottom_y);
-    if (c < lo || a > hi) continue;
+    const h = Math.max(0.75, Y(r.bottom_y) - a);
     layers.push(
       <div
         key={`f${r.idx}`}
         className={`pointer-events-none absolute ${r.unresolved ? "hatch" : ""}`}
-        style={{ left: X(lc[0]), width: Math.max(2, (lc[2] - lc[0]) * s * 0.5), top: a, height: Math.max(0.75, c - a), backgroundColor: r.color, opacity: 0.75 }}
+        style={{ left: X(lc[0]), width: Math.max(3, lcW * 0.5), top: a, height: h, backgroundColor: r.color, opacity: 0.85 }}
       />,
     );
+    if (a - lastBoundary >= 3) {
+      lastBoundary = a;
+      layers.push(<div key={`b${r.idx}`} className="pointer-events-none absolute h-px" style={{ left: X(lc[0]), width: lcW, top: a, backgroundColor: "#2F5BD3" }} />);
+    }
   }
 
-  // the three boxes
-  for (const bx of BOXES) {
-    const [x0, y0, x1, y1] = b[bx.key];
+  // the three regions, outlined and named with what they are for. Tags that would overlap stack one row apart.
+  const tagWidth = (r: (typeof REGIONS)[number]) => (r.name.length + r.role.length + 3) * 6.3 + 14;
+  const tagLift: Partial<Record<BoxKey, number>> = {};
+  {
+    const dcR = REGIONS.find((r) => r.key === "depth_column")!;
+    const [dx0, dy0] = b.depth_column;
+    const [lx0, ly0] = b.interpreted_lithology_column;
+    const overlapX = X(dx0) < X(lx0) ? X(dx0) + tagWidth(dcR) > X(lx0) : X(lx0) + tagWidth(REGIONS[2]) > X(dx0);
+    if (overlapX && Math.abs(Y(dy0) - Y(ly0)) < 24) tagLift.depth_column = 22;
+  }
+  for (const r of REGIONS) {
+    const [x0, y0, x1, y1] = b[r.key];
     layers.push(
       <div
-        key={bx.key}
-        className="pointer-events-none absolute rounded-[2px] border-[1.5px]"
-        style={{ left: X(x0), top: Y(y0), width: (x1 - x0) * s, height: (y1 - y0) * s, borderColor: bx.color }}
+        key={r.key}
+        className="pointer-events-none absolute rounded-[2px] border-2"
+        style={{ left: X(x0) - 1, top: Y(y0) - 1, width: (x1 - x0) * s + 2, height: (y1 - y0) * s + 2, borderColor: r.color }}
       />,
     );
-    // the tag sits on top of its box, or pins to the top of the viewer while the box runs on below
-    const pinned = Y(y0) < top + 28;
-    const tagTop = pinned ? Math.min(top + 8, Y(y1) - 22) : Y(y0);
-    if (Y(y1) > top + 30 && Y(y0) < top + size.h) {
+    const pinned = Y(y0) < top + PAD + 6;
+    if (Y(y1) > top + PAD + 30 && Y(y0) < top + size.h) {
+      const lift = tagLift[r.key] ?? 0;
+      const tagTop = pinned ? Math.min(top + PAD + 6 + lift, Y(y1) - 24) : Y(y0) - 3 - lift;
       layers.push(
         <span
-          key={`${bx.key}-tag`}
-          className="pointer-events-none absolute z-[5] whitespace-nowrap rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium text-white shadow"
-          style={{ left: X(x0), top: tagTop, backgroundColor: bx.color, transform: pinned ? undefined : "translateY(-100%)" }}
+          key={`${r.key}-tag`}
+          className="pointer-events-none absolute z-[5] whitespace-nowrap rounded-[3px] px-1.5 py-0.5 text-[11px] text-white shadow-md"
+          style={{
+            left: X(x0) - 1,
+            top: tagTop,
+            backgroundColor: r.color,
+            transform: pinned ? undefined : "translateY(-100%)",
+          }}
         >
-          {bx.label}
+          <span className="font-semibold">{r.name}</span> · {r.role}
         </span>,
       );
     }
   }
 
-  // where the column view was looking
-  if (focusY0 != null && focusY1 != null) {
-    layers.push(
-      <div
-        key="lens"
-        className="pointer-events-none absolute border-y-[1.5px] border-select bg-select/10"
-        style={{ left: left - 10, width: W + 20, top: Y(focusY0), height: Math.max(4, (focusY1 - focusY0) * s) }}
-      >
-        <span className="absolute -top-px right-0 -translate-y-full rounded-t-[3px] bg-select px-1.5 py-0.5 text-[10px] font-medium text-white">
-          Column view
-        </span>
-      </div>,
-    );
-  }
-
+  // selected bed
   const sel = intervals.find((r) => r.idx === selected);
   if (sel) {
     layers.push(
       <div
         key="sel"
         className="pointer-events-none absolute rounded-[2px]"
-        style={{ left: X(lc[0]) - 3, width: (lc[2] - lc[0]) * s + 6, top: Y(sel.top_y), height: Math.max(3, (sel.bottom_y - sel.top_y) * s), boxShadow: "0 0 0 2px #8F74EA" }}
+        style={{ left: X(lc[0]) - 3, width: lcW + 6, top: Y(sel.top_y), height: Math.max(3, (sel.bottom_y - sel.top_y) * s), boxShadow: `0 0 0 2px ${SELECT}`, zIndex: 3 }}
       />,
     );
   }
 
-  // hover guide: a line across the page with the depth and the bed under it
+  // depth ruler on the left of the page, separators across the label lane
+  layers.push(
+    ...rulerLayers({
+      map,
+      sy: Y,
+      imgY,
+      top,
+      viewH: size.h,
+      screenPxPerFt: s * pxPerFt,
+      xTicks: xPage - 2,
+      labelX: LEFT,
+      labelW: RULER - 20,
+      grid: { x: xPage + W + 2, w: CW - xPage - W - 2 },
+      yRange: [lc[1], lc[3]],
+    }),
+  );
+
+  // labels at their depth, leaders from the lithology column across the page
+  const { placed, hidden } = placeLabels(vis, Y, selected, top, size.h);
+  layers.push(...labelLayers({ placed, xFrom: X(lc[2]) + 2, xLabel, W: CW, H: CH, selected, onSelect, onHover: setHoverBedIdx, leader: "#9AA3AD" }));
+
+  // hover: a line across the page with the depth; a click opens the column view there
   const inLog = hoverY != null && hoverY >= lc[1] && hoverY <= lc[3];
   const hoverDepth = inLog ? map.depthAt(hoverY!) : null;
-  const hoverBed = inLog ? intervals.find((r) => r.top_y <= hoverY! && hoverY! < r.bottom_y) : undefined;
-  if (inLog && hoverDepth != null) {
+  if (inLog && hoverDepth != null && hoverBedIdx == null) {
     layers.push(
-      <div key="guide" className="pointer-events-none absolute h-px bg-ink/70" style={{ left: left - 10, width: W + 20, top: Y(hoverY!) }} />,
-      <div
+      <div key="guide" className="pointer-events-none absolute z-[6] h-px bg-select" style={{ left: xPage - 8, width: W + 16, top: Y(hoverY!) }} />,
+      <span
         key="guide-tag"
-        className="pointer-events-none absolute z-10 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-md border border-line-2 bg-panel px-2.5 py-1.5 text-xs text-ink shadow-lg shadow-black/40"
-        style={{ left: X(lc[2]) + 12, top: Y(hoverY!) }}
+        className="tabular pointer-events-none absolute z-[6] -translate-y-1/2 rounded bg-select px-1.5 py-0.5 font-mono text-[11px] text-white"
+        style={{ right: CW - xPage + 10, top: Y(hoverY!) }}
       >
-        <span className="tabular font-mono">{fmt(hoverDepth, 1)} ft</span>
-        {hoverBed && (
-          <>
-            <span aria-hidden="true" className={`h-2 w-2 rounded-[2px] ${hoverBed.unresolved ? "hatch" : ""}`} style={{ backgroundColor: hoverBed.color }} />
-            <span className={hoverBed.unresolved ? "text-rose" : ""}>
-              #{hoverBed.idx + 1} {hoverBed.rock}
-            </span>
-          </>
-        )}
-        <span className="text-faint">· click to open</span>
-      </div>,
+        {fmt(hoverDepth, 1)}
+      </span>,
     );
   }
 
@@ -213,27 +258,36 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
           className="absolute inset-0 overflow-auto"
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
-            setHoverY((e.clientY - rect.top + e.currentTarget.scrollTop - M) / s);
+            const x = e.clientX - rect.left + e.currentTarget.scrollLeft;
+            setHoverY(x >= xPage && x <= xPage + W ? imgY(e.clientY - rect.top + e.currentTarget.scrollTop) : null);
           }}
           onMouseLeave={() => setHoverY(null)}
           onClick={() => {
-            if (!inLog || hoverDepth == null) return;
-            if (hoverBed) onSelect(hoverBed.idx);
-            onOpen(hoverDepth);
+            if (inLog && hoverDepth != null) onOpen(hoverDepth);
           }}
           style={{ cursor: inLog ? "zoom-in" : "default" }}
         >
-          <div className="relative" style={{ width: Math.max(size.w, W + 2 * M), height: H + 2 * M }}>
-            <div
-              className="pointer-events-none absolute shadow-2xl shadow-black/60"
-              style={{ left, top: M, width: W, height: H, background: "#FBFBF9" }}
-            />
+          <div className="relative" style={{ width: CW, height: CH }}>
             {layers}
           </div>
         </div>
-        <div className="pointer-events-none absolute bottom-3 left-4 z-10 rounded-md bg-nav/85 px-2.5 py-1 text-[11px] text-muted backdrop-blur-sm">
-          {fmt(imgW)} × {fmt(imgH)} px · {fmt(intervals.length)} beds
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-8 items-center overflow-hidden border-b border-line bg-nav/95 text-[10px] uppercase tracking-wider text-faint">
+          <span className="absolute whitespace-nowrap text-right" style={{ left: LEFT - 8, width: RULER - 12 }}>
+            Depth ft
+          </span>
+          <span className="absolute flex gap-3 normal-case tracking-normal" style={{ left: xPage }}>
+            {REGIONS.map((r) => (
+              <span key={r.key} className="flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="h-2.5 w-2.5 rounded-[2px] border-2" style={{ borderColor: r.color }} />
+                {r.name}
+              </span>
+            ))}
+          </span>
+          <span className="absolute" style={{ left: xLabel + 8 }}>
+            Beds
+          </span>
         </div>
+        <HiddenNote n={hidden} />
       </div>
       <Minimap
         intervals={intervals}
@@ -241,10 +295,10 @@ export default function PageView({ log, intervals, selected, onSelect, fit, focu
         y1={imgH}
         height={size.h}
         top={top}
-        contentH={H + 2 * M}
+        contentH={CH}
         depthAt={map.depthAt}
         yAt={map.yAt}
-        onSeek={(frac) => scrollTo(frac * (H + 2 * M) - size.h / 2)}
+        onSeek={(frac) => scrollTo(frac * CH - size.h / 2)}
       />
     </div>
   );
