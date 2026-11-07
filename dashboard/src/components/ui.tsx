@@ -9,11 +9,31 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   );
 }
 
-export function Dot({ color, unresolved, size = 8 }: { color: string; unresolved?: boolean; size?: number }) {
+/** Texture class of a bed: unresolved (nothing matches clearly) or similar types (2-3 look-alike entries). */
+export function texture(r: { unresolved?: boolean; lookalike?: boolean }): string {
+  return r.unresolved ? "hatch" : r.lookalike ? "hatch-light" : "";
+}
+
+/** Name shown for a bed: the look-alike entries ("Clay-shale / Sandy clay-shale") when vision could not pick one. */
+export function bedName(r: { rock: string; lookalike?: boolean; alternatives?: string }): string {
+  return r.lookalike && r.alternatives ? r.alternatives : r.rock;
+}
+
+export function Dot({
+  color,
+  unresolved,
+  similar,
+  size = 8,
+}: {
+  color: string;
+  unresolved?: boolean;
+  similar?: boolean;
+  size?: number;
+}) {
   return (
     <span
       aria-hidden="true"
-      className={`inline-block shrink-0 rounded-[2px] ${unresolved ? "hatch" : ""}`}
+      className={`inline-block shrink-0 rounded-[2px] ${texture({ unresolved, lookalike: similar })}`}
       style={{ width: size, height: size, backgroundColor: color }}
     />
   );

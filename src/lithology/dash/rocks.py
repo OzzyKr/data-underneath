@@ -14,6 +14,7 @@ import colorsys
 import re
 
 UNRESOLVED = "Unresolved"
+SIMILAR = "Similar types"  # vision narrowed a bed to 2-3 look-alike legend entries but cannot pick one
 
 # Validated dark-mode categorical slots, mapped to rock families by convention. Chart stacking order below keeps
 # neighbouring segments in the validated adjacent order (all checks pass on #121419 and #171A20).
@@ -29,9 +30,12 @@ FAMILY_COLOURS: dict[str, str] = {
     "Coal": "#7E8794",
     "Conglomerate": "#7E8794",
     "Other": "#7E8794",
+    SIMILAR: "#A3AAB6",
     UNRESOLVED: "#4A515C",
 }
-CHART_FAMILIES = ["Limestone", "Silt", "Shale", "Sand", "Salt", "Clay", "Dolomite", "Volcanic", "Other", UNRESOLVED]
+CHART_FAMILIES = [
+    "Limestone", "Silt", "Shale", "Sand", "Salt", "Clay", "Dolomite", "Volcanic", "Other", SIMILAR, UNRESOLVED,
+]  # fmt: skip
 FOLD_TO_OTHER = {"Coal", "Conglomerate"}  # rare in this data set; folded so charts keep <= 8 hues
 SLOTS = ["#3987E5", "#D95926", "#199E70", "#C98500", "#D55181", "#008300", "#9085E9", "#E66767"]
 FAMILY_ORDER = list(FAMILY_COLOURS)

@@ -154,7 +154,7 @@ def create_app(paths: Paths | None = None) -> FastAPI:
         row["rocks"] = st().q(
             """SELECT rock, any_value(color) AS color, any_value(rock_family) AS family, count(*) AS beds,
                       sum(thickness_ft) AS feet, list(DISTINCT cluster_id ORDER BY cluster_id) AS clusters,
-                      bool_or(unresolved) AS unresolved, min(idx) AS first
+                      bool_or(unresolved) AS unresolved, bool_or(lookalike) AS lookalike, min(idx) AS first
                FROM intervals WHERE log_id = ? GROUP BY rock ORDER BY feet DESC NULLS LAST""",
             [log_id],
         )
@@ -172,7 +172,8 @@ def create_app(paths: Paths | None = None) -> FastAPI:
         _log_or_404(st(), log_id)
         return st().q(
             """SELECT idx, top_depth, bottom_depth, thickness_ft, top_y, bottom_y, cluster_id, lithology, rock,
-                      rock_family, unresolved, confidence, notes, color FROM intervals WHERE log_id = ? ORDER BY idx""",
+                      rock_family, unresolved, lookalike, alternatives, confidence, notes, color
+               FROM intervals WHERE log_id = ? ORDER BY idx""",
             [log_id],
         )
 

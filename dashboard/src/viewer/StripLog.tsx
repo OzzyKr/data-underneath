@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Interval, LogDetail } from "../api";
+import { texture } from "../components/ui";
 import { fmt } from "../format";
 import { depthMapper, depthTicks, shortDepth } from "./depth";
 import { HiddenNote, SELECT, estimatePxPerFt, labelLayers, placeLabels, rulerLayers } from "./layers";
@@ -210,7 +211,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, jum
     const h = Math.max(1, sy(r.bottom_y) - a);
     const isSel = r.idx === selected;
     layers.push(
-      <div key={`p${r.idx}`} className={`absolute ${r.unresolved ? "hatch" : ""}`} style={{ left: xPred, width: PRED, top: a, height: h, backgroundColor: r.color }} />,
+      <div key={`p${r.idx}`} className={`absolute ${texture(r)}`} style={{ left: xPred, width: PRED, top: a, height: h, backgroundColor: r.color }} />,
     );
     if (a - lastBoundary >= 3) {
       lastBoundary = a;

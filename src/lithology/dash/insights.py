@@ -44,8 +44,9 @@ def headline(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
     )[0]
     r = _rows(
         con,
-        """SELECT count(DISTINCT lower(rock)) FILTER (WHERE NOT unresolved) AS rock_names,
-                  sum(thickness_ft) FILTER (WHERE unresolved) / nullif(sum(thickness_ft), 0) AS unresolved_share
+        """SELECT count(DISTINCT lower(rock)) FILTER (WHERE NOT unresolved AND NOT lookalike) AS rock_names,
+                  sum(thickness_ft) FILTER (WHERE unresolved) / nullif(sum(thickness_ft), 0) AS unresolved_share,
+                  sum(thickness_ft) FILTER (WHERE lookalike) / nullif(sum(thickness_ft), 0) AS similar_share
            FROM intervals""",
     )[0]
     return {**h, **r}
@@ -91,7 +92,9 @@ def correlation_candidates(con: duckdb.DuckDBPyConnection) -> list[dict[str, Any
     """One log per well, best first: most feet the pipeline named with confidence (not Unresolved)."""
     named = dict(
         con.execute(
-            "SELECT log_id, sum(thickness_ft) FROM intervals WHERE NOT unresolved AND thickness_ft > 0 GROUP BY 1"
+            "SELECT log_id, sum(thickness_ft) FROM intervals "
+            "WHERE NOT unresolved AND NOT lookalike AND thickness_ft > 0 "
+            "GROUP BY 1"
         ).fetchall()
     )
     return sorted(_one_log_per_well(con), key=lambda w: -(named.get(w["log_id"]) or 0))
@@ -132,8 +135,9 @@ def families() -> list[dict[str, str]]:
 
 NOTE_SYSTEM = (
     "You write one short note under a chart in an engineering dashboard about digitised well logs. "
-    "The data was extracted from scanned mud logs by a computer-vision pipeline; 'Unresolved' means it could not "
-    "tell two rocks apart. Write one or two plain sentences, at most 45 words, for geoscientists. Use exact numbers "
+    "The data was extracted from scanned mud logs by a computer-vision pipeline; 'Unresolved' marks beds where it "
+    "could not tell two rocks apart (the CSV then holds its flagged best guess). "
+    "Write one or two plain sentences, at most 45 words, for geoscientists. Use exact numbers "
     "from the data, with units. No hype and nothing the data does not show. If a value looks implausible (for "
     "example one rock making up almost a whole well), say it is worth checking against the scan. Plain text only."
 )
@@ -263,7 +267,7 @@ def snapshot(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
     queries = {
         "logs": f"SELECT {AI_LOG_COLUMNS} FROM logs",
         "intervals": "SELECT log_id, idx, top_depth, bottom_depth, thickness_ft, top_y, bottom_y, cluster_id, "
-        "lithology, rock, rock_family, unresolved, confidence, notes FROM intervals",
+        "lithology, rock, rock_family, lookalike, alternatives, unresolved, confidence, notes FROM intervals",
         "legend": "SELECT log_id, label, is_rock, used, beds, cluster_id FROM legend",
     }
     for name, q in queries.items():
@@ -302,7 +306,10 @@ def _jsonable(v: Any) -> Any:
 
 ASK_SYSTEM = """You answer questions about digitised well logs for an engineering demo. A computer-vision pipeline read
 the lithology column of each scanned mud log (US Gulf of Mexico offshore wells and some onshore wells) and named each
-bed from the log's own legend. 'Unresolved' beds are ones the pipeline could not name with confidence.
+bed from the log's own legend. Two kinds of beds are not named with confidence; for both, lithology holds the
+pipeline's best guess. lookalike = true: vision narrowed the bed to 2-3 look-alike legend entries (listed in
+alternatives, e.g. 'Clay-shale / Sandy clay-shale') but cannot pick one. unresolved = true: no legend entry matches
+the bed clearly.
 
 You can query three DuckDB tables with the run_sql tool:
 
@@ -316,7 +323,7 @@ intervals: one row per bed (interval) in a log.
   log_id, idx (order from the top), top_depth, bottom_depth (feet), thickness_ft (NULL if depth unknown), top_y,
   bottom_y (pixel rows in the scan), cluster_id, lithology (name as written in the CSV), rock (display name),
   rock_family (one of Sand, Silt, Shale, Clay, Limestone, Dolomite, Salt, Coal, Volcanic, Conglomerate, Other,
-  Unresolved), unresolved (boolean), confidence (0-1), notes.
+  Similar types, Unresolved), lookalike (boolean), alternatives, unresolved (boolean), confidence (0-1), notes.
 legend: one row per legend entry read from a log.
   log_id, label, is_rock, used (appears in the log's beds), beds, cluster_id.
 

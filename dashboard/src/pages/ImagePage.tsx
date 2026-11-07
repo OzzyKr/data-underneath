@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useIntervals, useLog, type Interval, type LogDetail } from "../api";
 import { fmt, rememberLog } from "../format";
-import { Dot, ErrorNote } from "../components/ui";
+import { Dot, ErrorNote, bedName } from "../components/ui";
 import StripLog, { type Span } from "../viewer/StripLog";
 import PageView, { type Fit } from "../viewer/PageView";
 
@@ -208,10 +208,16 @@ function SelectedBed({ log, iv, count, onStep }: { log: LogDetail; iv: Interval 
       ) : (
         <>
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <Dot color={iv.color} unresolved={iv.unresolved} size={10} />
-            <span className={`text-base font-semibold ${iv.unresolved ? "text-rose" : ""}`}>{iv.rock}</span>
+            <Dot color={iv.color} unresolved={iv.unresolved} similar={iv.lookalike} size={10} />
+            <span className={`text-base font-semibold ${iv.unresolved ? "text-rose" : ""}`}>{bedName(iv)}</span>
             {iv.cluster_id != null && <span className="text-[13px] text-muted">cluster {iv.cluster_id}</span>}
           </div>
+          {iv.lookalike && (
+            <p className="m-0 text-[13px] leading-relaxed text-muted">
+              Similar types: computer vision narrowed this bed to these look-alike legend entries but cannot pick one.
+              The CSV holds its best guess, {iv.rock}.
+            </p>
+          )}
           {iv.unresolved && iv.notes && <p className="m-0 text-[13px] leading-relaxed text-muted">{iv.notes}</p>}
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
             <dt className="text-faint">Depth</dt>
@@ -289,9 +295,9 @@ function BedList({
                   r.idx === selected ? "bg-panel-2" : ""
                 }`}
               >
-                <Dot color={r.color} unresolved={r.unresolved} />
+                <Dot color={r.color} unresolved={r.unresolved} similar={r.lookalike} />
                 <span className="w-9 shrink-0 font-mono text-[11px] text-faint">#{r.idx + 1}</span>
-                <span className={`truncate ${on ? (r.unresolved ? "text-rose" : "text-ink") : "text-faint"}`}>{r.rock}</span>
+                <span className={`truncate ${on ? (r.unresolved ? "text-rose" : "text-ink") : "text-faint"}`}>{bedName(r)}</span>
                 <span className={`tabular ml-auto shrink-0 font-mono text-[11px] ${on ? "text-muted" : "text-faint/70"}`}>{fmt(r.top_depth, 1)}</span>
               </button>
             );

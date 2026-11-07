@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Interval, LogDetail } from "../api";
+import { texture } from "../components/ui";
 import { fmt } from "../format";
 import { depthMapper } from "./depth";
 import { HiddenNote, SELECT, estimatePxPerFt, labelLayers, placeLabels, rulerLayers } from "./layers";
@@ -24,10 +25,10 @@ const LABELS = 260;
 const BOTTOM = 24;
 
 type BoxKey = "depth_column" | "interpreted_lithology_column" | "lithology_legend";
-export const REGIONS: { key: BoxKey; name: string; role: string; color: string }[] = [
-  { key: "lithology_legend", name: "Legend", role: "rock names are read here", color: "#E79A3C" },
-  { key: "depth_column", name: "Depth column", role: "depths are read here", color: "#E5484D" },
-  { key: "interpreted_lithology_column", name: "Lithology column", role: "beds are found here", color: "#3987E5" },
+export const REGIONS: { key: BoxKey; name: string; color: string }[] = [
+  { key: "lithology_legend", name: "Legend", color: "#E79A3C" },
+  { key: "depth_column", name: "Depth column", color: "#E5484D" },
+  { key: "interpreted_lithology_column", name: "Lithology column", color: "#3987E5" },
 ];
 
 /** The original scan, uncropped and true to proportion, with what the pipeline read and found drawn on it. */
@@ -150,7 +151,7 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
     layers.push(
       <div
         key={`f${r.idx}`}
-        className={`pointer-events-none absolute ${r.unresolved ? "hatch" : ""}`}
+        className={`pointer-events-none absolute ${texture(r)}`}
         style={{ left: X(lc[0]), width: Math.max(3, lcW * 0.5), top: a, height: h, backgroundColor: r.color, opacity: 0.85 }}
       />,
     );
@@ -160,8 +161,8 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
     }
   }
 
-  // the three regions, outlined and named with what they are for. Tags that would overlap stack one row apart.
-  const tagWidth = (r: (typeof REGIONS)[number]) => (r.name.length + r.role.length + 3) * 6.3 + 14;
+  // the three regions, outlined and named. Tags that would overlap stack one row apart.
+  const tagWidth = (r: (typeof REGIONS)[number]) => r.name.length * 6.3 + 14;
   const tagLift: Partial<Record<BoxKey, number>> = {};
   {
     const dcR = REGIONS.find((r) => r.key === "depth_column")!;
@@ -194,7 +195,7 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
             transform: pinned ? undefined : "translateY(-100%)",
           }}
         >
-          <span className="font-semibold">{r.name}</span> · {r.role}
+          <span className="font-semibold">{r.name}</span>
         </span>,
       );
     }

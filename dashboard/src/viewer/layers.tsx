@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Interval, LogDetail } from "../api";
+import { bedName, texture } from "../components/ui";
 import { fmt } from "../format";
 
 /** Shared drawing for the Column and Original scan views: depth ruler, bed labels and their leader lines. */
@@ -137,9 +138,9 @@ export function labelLayers(o: {
         style={{ left: o.xLabel, top: y, height: lh, zIndex: 4 }}
       >
         <span className="flex items-center gap-2 whitespace-nowrap text-[13px] leading-4">
-          <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-[2px] ${r.unresolved ? "hatch" : ""}`} style={{ backgroundColor: r.color }} />
+          <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-[2px] ${texture(r)}`} style={{ backgroundColor: r.color }} />
           <span className="font-mono text-[11px] text-faint">#{r.idx + 1}</span>
-          <span className={`${r.unresolved ? "text-rose" : "text-ink"} ${isSel ? "font-semibold" : ""}`}>{r.rock}</span>
+          <span className={`${r.unresolved ? "text-rose" : "text-ink"} ${isSel ? "font-semibold" : ""}`}>{bedName(r)}</span>
           {lh < 30 && <span className="font-mono text-[11px] text-faint">{fmt(r.top_depth, 1)} ft</span>}
         </span>
         {lh >= 30 && (

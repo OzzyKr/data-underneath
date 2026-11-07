@@ -23,7 +23,7 @@ import pandas as pd
 import yaml
 
 from lithology.dash.paths import Paths
-from lithology.dash.rocks import CHROMA_MIN, UNRESOLVED, display_name, log_colours, rock_family
+from lithology.dash.rocks import CHROMA_MIN, SIMILAR, UNRESOLVED, display_name, log_colours, rock_family
 from lithology.dash.titles import api_number, scale_label, short_title
 from lithology.io import depth_reference, family_of, scale_inches_per_100ft
 from lithology.models import Annotation, DocumentBoxes
@@ -42,7 +42,7 @@ CREATE TABLE logs (
 CREATE TABLE intervals (
   log_id VARCHAR, idx INTEGER, top_depth DOUBLE, bottom_depth DOUBLE, thickness_ft DOUBLE, top_y INTEGER,
   bottom_y INTEGER, cluster_id INTEGER, lithology VARCHAR, rock VARCHAR, rock_family VARCHAR, unresolved BOOLEAN,
-  confidence DOUBLE, notes VARCHAR, color VARCHAR
+  lookalike BOOLEAN, alternatives VARCHAR, confidence DOUBLE, notes VARCHAR, color VARCHAR
 );
 CREATE TABLE legend (
   log_id VARCHAR, idx INTEGER, label VARCHAR, x0 INTEGER, y0 INTEGER, x1 INTEGER, y1 INTEGER, is_rock BOOLEAN,
@@ -139,7 +139,7 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
         diag if diag.exists() else src.out_dir / f"{src.doc_id}.csv",
         keep_default_na=False,
         na_values=[""],
-        dtype={"lithology": str, "notes": str},
+        dtype={"lithology": str, "notes": str, "status": str, "alternatives": str},
     )
     df["lithology"] = df["lithology"].astype(str)
     notes = df["notes"].fillna("").astype(str) if "notes" in df else pd.Series([""] * len(df))
@@ -165,9 +165,17 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
     bottom = pd.to_numeric(df["bottom_depth"], errors="coerce")
     thick = (bottom - top).where(lambda s: s > 0)
     rock = df["lithology"].map(display_name)
-    unresolved = (df["lithology"].str.lower() == unresolved_label.lower()) | notes.str.contains(
-        "could not differentiate"
-    )
+    # status column (pipeline >= 2026-11-07): named | similar | unresolved; older outputs only have the notes
+    if "status" in df:
+        status = df["status"].fillna("named").astype(str)
+        similar = status == "similar"
+        unresolved = status == "unresolved"
+    else:
+        similar = pd.Series([False] * len(df))
+        unresolved = (df["lithology"].str.lower() == unresolved_label.lower()) | notes.str.contains(
+            "could not differentiate"
+        )
+    alternatives = df["alternatives"].fillna("").astype(str) if "alternatives" in df else pd.Series([""] * len(df))
     lid = src.log_id
     intervals = pd.DataFrame(
         {
@@ -182,9 +190,12 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
             "lithology": df["lithology"],
             "rock": rock,
             "rock_family": [
-                UNRESOLVED if u else rock_family(n) for n, u in zip(df["lithology"], unresolved, strict=True)
+                UNRESOLVED if u else SIMILAR if m else rock_family(n)
+                for n, u, m in zip(df["lithology"], unresolved, similar, strict=True)
             ],
             "unresolved": unresolved,
+            "lookalike": similar,
+            "alternatives": alternatives,
             "confidence": pd.to_numeric(df["confidence"], errors="coerce") if "confidence" in df else None,
             "notes": notes,
             "color": rock.map(colours),
@@ -237,7 +248,7 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
     ann = Annotation.from_json(src.ann_path) if src.ann_path and src.ann_path.exists() else None
     tiles_meta = tiles_root / lid / "meta.json"
     s = summary or {}
-    rock_rows = intervals[~intervals["unresolved"]]
+    rock_rows = intervals[~intervals["unresolved"] & ~intervals["lookalike"]]
     is_colour = any(e.get("chroma", 0) >= CHROMA_MIN for e in legend if e.get("is_rock", True))
     row = {
         "log_id": lid,

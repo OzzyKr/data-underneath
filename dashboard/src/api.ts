@@ -41,6 +41,7 @@ export type Rock = {
   feet: number | null;
   clusters: number[];
   unresolved: boolean;
+  lookalike: boolean;
   first: number;
 };
 
@@ -87,6 +88,8 @@ export type Interval = {
   rock: string;
   rock_family: string;
   unresolved: boolean;
+  lookalike: boolean;
+  alternatives: string;
   confidence: number | null;
   notes: string;
   color: string;
@@ -105,6 +108,7 @@ export type Insights = {
     peak_mb: number | null;
     rock_names: number;
     unresolved_share: number | null;
+    similar_share: number | null;
   };
   mix: MixRow[];
   correlation: { logs: CorrLog[]; candidates: { log_id: string; well: string; title: string }[] };

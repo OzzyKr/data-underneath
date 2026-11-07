@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, Download, Search } from "lucide-react";
 import { useIntervals, useLog, type Interval, type Rock } from "../api";
 import { fmt, logSubtitle, memory, pct, rememberLog, seconds } from "../format";
-import { Dot, ErrorNote, Stat } from "../components/ui";
+import { Dot, ErrorNote, Stat, texture } from "../components/ui";
 
 const COLS = "grid grid-cols-[1fr_1fr_1.5fr_0.9fr_0.9fr_0.7fr_0.8fr] gap-x-4";
 
@@ -163,8 +163,9 @@ function Row({ r, top, active, onOpen }: { r: Interval; top: number; active: boo
       <span>{raw(r.top_depth)}</span>
       <span>{raw(r.bottom_depth)}</span>
       <span className="flex min-w-0 items-center gap-2.5 font-sans text-sm" title={r.notes || undefined}>
-        <Dot color={r.color} unresolved={r.unresolved} />
+        <Dot color={r.color} unresolved={r.unresolved} similar={r.lookalike} />
         <span className={`truncate ${r.unresolved ? "text-rose" : ""}`}>{r.lithology}</span>
+        {r.lookalike && r.alternatives && <span className="truncate text-xs text-faint">similar: {r.alternatives}</span>}
         {r.unresolved && r.notes && <span className="truncate text-xs text-faint">{shortNote(r.notes)}</span>}
       </span>
       <span className="text-muted">{r.top_y}</span>
@@ -192,7 +193,7 @@ function Composition({ rocks, total }: { rocks: Rock[]; total: number }) {
           <div
             key={r.rock}
             title={`${r.rock}: ${pct((r.feet ?? 0) / total, 1)}`}
-            className={r.unresolved ? "hatch" : ""}
+            className={texture(r)}
             style={{ flex: `${r.feet} 1 0`, backgroundColor: r.color }}
           />
         ))}
@@ -200,7 +201,7 @@ function Composition({ rocks, total }: { rocks: Rock[]; total: number }) {
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         {shown.slice(0, 10).map((r) => (
           <span key={r.rock} className="flex items-center gap-2 text-[13px] text-muted">
-            <Dot color={r.color} unresolved={r.unresolved} />
+            <Dot color={r.color} unresolved={r.unresolved} similar={r.lookalike} />
             <span className="text-ink">{r.rock}</span>
             {pct((r.feet ?? 0) / total)}
           </span>

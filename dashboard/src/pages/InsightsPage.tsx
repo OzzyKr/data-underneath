@@ -43,7 +43,8 @@ export default function InsightsPage() {
         <Stat label="Beds" value={fmt(h.beds)} />
         <Stat label="Feet of borehole" value={fmt(h.feet)} />
         <Stat label="Rock names" value={fmt(h.rock_names)} />
-        <Stat label="Unresolved" value={pct(h.unresolved_share)} hint="Share of logged feet the pipeline would not name with confidence" />
+        <Stat label="Similar types" value={pct(h.similar_share)} hint="Share of logged feet narrowed to 2-3 look-alike legend entries" />
+        <Stat label="Unresolved" value={pct(h.unresolved_share)} hint="Share of logged feet where no legend entry matches clearly" />
         <Stat
           label="Processing"
           value={`${fmt(h.seconds_per_log, 1)} s / log`}
@@ -77,7 +78,7 @@ function Legend({ items, colour }: { items: string[]; colour: Record<string, str
     <div className="flex flex-wrap gap-x-4 gap-y-2">
       {items.map((f) => (
         <span key={f} className="flex items-center gap-1.5 text-xs text-muted">
-          <Dot color={colour[f]} unresolved={f === "Unresolved"} />
+          <Dot color={colour[f]} unresolved={f === "Unresolved"} similar={f === "Similar types"} />
           {f === "Salt" ? "Salt / evaporite" : f}
         </span>
       ))}
