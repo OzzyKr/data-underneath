@@ -1,0 +1,2 @@
+timestamp,commit,config_hash,pred,note,n,correct,accuracy,flagged,confident_wrong
+2026-11-07T20:16:40,e2bebd2-dirty,89788cf4acf0,base,baseline e2bebd2 tier2 abstain,65,34,0.5231,21,10

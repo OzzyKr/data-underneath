@@ -61,7 +61,9 @@ render:
   coverage: 0.5              # fraction of the lithology column painted with the prediction
 
 runtime:
-  workers: 2                 # documents processed in parallel (each in its own process)
+  workers: 3                 # at most this many documents in parallel (each in its own process)...
+  memory_budget_mb: 6000     # ...and only while their estimated peak memory fits here (8 GB machine). The estimate
+                             # is read from the image header before decoding: huge logs run alone, small ones together.
 
 ai:
   tier: 2                    # 1 = classical only; 2 = + local pretrained second opinion (measured to help

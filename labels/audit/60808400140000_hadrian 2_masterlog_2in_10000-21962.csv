@@ -1,0 +1,7 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+11782.38,11837.38,Halite,8652,8872,hadrian#1,claude-vision
+13904.88,13959.88,Shale grey,17142,17362,hadrian#2,claude-vision
+16610.13,16616.13,Siltstone,27963,27987,hadrian#3,claude-vision
+20252.13,20257.63,Shale grey,42531,42553,hadrian#6,claude-vision
+20858.63,20880.13,Siltstone,44957,45043,hadrian#7,claude-vision
+20882.13,20897.13,Marl,45051,45111,hadrian#8,claude-vision

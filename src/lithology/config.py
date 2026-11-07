@@ -87,6 +87,7 @@ class RenderConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     workers: int
+    memory_budget_mb: float = 6000.0
 
 
 @dataclass(frozen=True)

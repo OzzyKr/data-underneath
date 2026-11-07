@@ -17,6 +17,7 @@ conda activate lithology
 lith check-data                        # audit dataset/, write data/manifest.json
 lith run dataset/images --out out      # CSV + annotated PNG per log, plus run_summary.csv
 lith eval --pred out --labels labels   # score against hand labels (dev split), append to eval/results_log.csv
+lith audit --pred out                  # score naming against eye-audit spot labels (labels/audit)
 make check                             # lint + tests
 ```
 
@@ -82,5 +83,8 @@ Every threshold lives in `config/default.yaml`, in feet or as a fraction of a bo
 - Same input + same config = same output. No network calls in the default run.
 - Every change is scored; results are logged with git commit, config hash and dataset hash.
 - Accuracy is claimed only on a frozen holdout (see `labels/manifest.yaml`), split by document family.
-- A failed step degrades and is reported; a batch never stops on one bad document.
-- Each document runs in its own process, so runtime and peak memory are measured per document.
+- A failed step degrades and is reported; a batch never stops on one bad document, even when its worker process
+  dies (e.g. out of memory): the documents lost with it are retried one at a time.
+- Each document runs in its own process, so runtime and peak memory (including the annotated image) are measured
+  per document. Documents start largest first and only while their estimated peak memory (read from the image
+  header) fits `runtime.memory_budget_mb` (6000 MB, for an 8 GB machine).

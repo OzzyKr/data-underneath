@@ -11,7 +11,9 @@ import logging
 import subprocess
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 import yaml
@@ -68,6 +70,9 @@ def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
             write_outputs(doc, res, Path(out_dir), cfg, image=images)
         except Exception as e:  # an output failure is reported, not fatal
             res.warnings.append(f"output failed: {type(e).__name__}: {e}")
+    from lithology.pipeline import peak_rss_mb
+
+    res.peak_rss_mb = round(peak_rss_mb(), 1)  # after the annotated image too: the true peak of this document
     return {
         "doc_id": doc.doc_id,
         "ok": res.ok,
@@ -82,6 +87,108 @@ def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
         "timings": json.dumps(res.timings_s),
         "warnings": " | ".join(res.warnings),
     }
+
+
+# Measured 2026-11-07 on all 51 logs: peak memory <= decoded image + ~1.3 GB (OCR, pretrained model, crops).
+_BASE_MB = 1300.0
+
+
+def estimate_peak_mb(doc: Document) -> float:
+    """Peak memory estimate for one document, from the image header only (nothing is decoded)."""
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    try:
+        with Image.open(doc.image_path) as im:
+            w, h = im.size
+            bpp = 1 if im.mode in ("1", "L", "P") else 2 if im.mode.startswith("I;16") else 4
+    except Exception:
+        return 2 * _BASE_MB
+    return w * h * bpp / 1e6 + _BASE_MB
+
+
+def _error_row(doc: Document, error: str) -> dict:
+    return {
+        "doc_id": doc.doc_id,
+        "ok": False,
+        "error": error,
+        "n_intervals": 0,
+        "n_legend": 0,
+        "px_per_ft": "",
+        "scale_points": 0,
+        "scale_conf": 0,
+        "seconds": 0.0,
+        "peak_rss_mb": 0.0,
+        "timings": "{}",
+        "warnings": "",
+    }
+
+
+def run_batch(
+    jobs: list[tuple], est_mb: list[float], workers: int, budget_mb: float, on_row=None, fn=None
+) -> list[dict]:
+    """Run documents in worker processes; a worker that dies (e.g. out of memory) never stops the batch.
+
+    Jobs are started largest first, and only while the estimated peak memory of the running ones fits the budget
+    (a job larger than the whole budget runs alone). A dead worker breaks the whole pool, so every job running at
+    that moment is retried later, one at a time; a job that kills its worker even when alone is reported as an error.
+    """
+    fn = fn or _run_one
+    queue = deque(sorted(range(len(jobs)), key=lambda i: -est_mb[i]))
+    rows: dict[int, dict] = {}
+    suspects: list[int] = []
+
+    def emit(i: int, row: dict) -> None:
+        rows[i] = row
+        if on_row is not None:
+            on_row(row)
+
+    def drain(order: deque, n_workers: int, budget: float, retry: bool) -> None:
+        running: dict[Future, int] = {}
+        ex = ProcessPoolExecutor(max_workers=n_workers, max_tasks_per_child=1)
+        try:
+            while order or running:
+                used = sum(est_mb[i] for i in running.values())
+                while order and len(running) < n_workers:
+                    fit = next((i for i in order if used + est_mb[i] <= budget), None)
+                    if fit is None:
+                        if running:
+                            break
+                        fit = order[0]  # too big for the budget: run it alone
+                    order.remove(fit)
+                    running[ex.submit(fn, jobs[fit])] = fit
+                    used += est_mb[fit]
+                done, _ = wait(running, return_when=FIRST_COMPLETED)
+                broken = False
+                for f in done:
+                    i = running.pop(f)
+                    try:
+                        emit(i, f.result())
+                    except BrokenProcessPool:
+                        broken = True
+                        if retry:
+                            emit(i, _error_row(jobs[i][0], "worker process died (likely out of memory)"))
+                        else:
+                            suspects.append(i)
+                    except Exception as e:  # anything else from the worker is that document's error
+                        emit(i, _error_row(jobs[i][0], f"{type(e).__name__}: {e}"))
+                if broken:  # the pool is unusable: everything still running is lost with it
+                    for i in running.values():
+                        if retry:
+                            order.appendleft(i)
+                        else:
+                            suspects.append(i)
+                    running.clear()
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    ex = ProcessPoolExecutor(max_workers=n_workers, max_tasks_per_child=1)
+        finally:
+            ex.shutdown(wait=True, cancel_futures=True)
+
+    drain(queue, workers, budget_mb, retry=False)
+    if suspects:
+        log.warning("%d document(s) lost with a dead worker: retrying them one at a time", len(suspects))
+        drain(deque(suspects), 1, float("inf"), retry=True)
+    return [rows[i] for i in range(len(jobs))]
 
 
 def cmd_run(a: argparse.Namespace) -> int:
@@ -101,21 +208,22 @@ def cmd_run(a: argparse.Namespace) -> int:
         _git_commit(),
     )
     t0 = time.perf_counter()
-    rows = []
     jobs = [(d, a.config, str(out), not a.no_images) for d in docs]
-    with ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=1) as ex:
-        for row in ex.map(_run_one, jobs):
-            rows.append(row)
-            status = "ok " if row["ok"] else "ERR"
-            log.info(
-                "%s %6.1fs %6.0f MB %4d intervals  %s %s",
-                status,
-                row["seconds"],
-                row["peak_rss_mb"],
-                row["n_intervals"],
-                row["doc_id"][:70],
-                row["error"],
-            )
+
+    def report(row: dict) -> None:
+        status = "ok " if row["ok"] else "ERR"
+        log.info(
+            "%s %6.1fs %6.0f MB %4d intervals  %s %s",
+            status,
+            row["seconds"],
+            row["peak_rss_mb"],
+            row["n_intervals"],
+            row["doc_id"][:70],
+            row["error"],
+        )
+
+    est = [estimate_peak_mb(d) for d in docs]
+    rows = run_batch(jobs, est, workers, cfg.runtime.memory_budget_mb, on_row=report)
     wall = time.perf_counter() - t0
     with open(out / "run_summary.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
@@ -136,6 +244,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "max_seconds_per_doc": max(secs),
         "max_peak_rss_mb": max(mem),
         "workers": workers,
+        "memory_budget_mb": cfg.runtime.memory_budget_mb,
     }
     (out / "run_meta.json").write_text(json.dumps(meta, indent=2))
     log.info(
@@ -207,6 +316,77 @@ def cmd_eval(a: argparse.Namespace) -> int:
         if new:
             w.writeheader()
         w.writerow(row)
+    return 0
+
+
+def cmd_audit(a: argparse.Namespace) -> int:
+    """Score a run against the eye-audit spot labels (labels/audit) and append the result to eval/audit_log.csv."""
+    from lithology.evaluate import AuditScore, score_audit
+
+    pred_dir, audit_dir = Path(a.pred), Path(a.audit)
+    totals = AuditScore(0, 0, 0, 0)
+    for af in sorted(audit_dir.glob("*.csv")):
+        pf = pred_dir / "diagnostics" / af.name
+        if not pf.exists():
+            log.warning("missing prediction for %s", af.stem)
+            continue
+        with open(af, newline="") as f:
+            audit = list(csv.DictReader(f))
+        with open(pf, newline="") as f:
+            pred = list(csv.DictReader(f))
+        s = score_audit(pred, audit)
+        keys = ("n", "correct", "flagged", "confident_wrong")
+        totals = AuditScore(*(getattr(totals, k) + getattr(s, k) for k in keys))
+        log.info(
+            "%-55s %2d/%2d right  %2d flagged  %2d confident-wrong",
+            af.stem[:55],
+            s.correct,
+            s.n,
+            s.flagged,
+            s.confident_wrong,
+        )
+    log.info(
+        "AUDIT: %d/%d right (%.1f%%), %d flagged, %d confident-wrong",
+        totals.correct,
+        totals.n,
+        100 * totals.accuracy,
+        totals.flagged,
+        totals.confident_wrong,
+    )
+    log_path = REPO / "eval" / "audit_log.csv"
+    new = not log_path.exists()
+    with open(log_path, "a", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(
+                [
+                    "timestamp",
+                    "commit",
+                    "config_hash",
+                    "pred",
+                    "note",
+                    "n",
+                    "correct",
+                    "accuracy",
+                    "flagged",
+                    "confident_wrong",
+                ]
+            )
+        cfg = load_config(Path(a.config) if a.config else None)
+        w.writerow(
+            [
+                dt.datetime.now().isoformat(timespec="seconds"),
+                _git_commit(),
+                cfg.hash(),
+                pred_dir.name,
+                a.note or "",
+                totals.n,
+                totals.correct,
+                round(totals.accuracy, 4),
+                totals.flagged,
+                totals.confident_wrong,
+            ]
+        )
     return 0
 
 
@@ -393,6 +573,13 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--config")
     e.add_argument("--note")
     e.set_defaults(fn=cmd_eval)
+
+    au = sub.add_parser("audit", help="score a run against the eye-audit spot labels (labels/audit)")
+    au.add_argument("--pred", default="out")
+    au.add_argument("--audit", default=str(REPO / "labels" / "audit"))
+    au.add_argument("--config")
+    au.add_argument("--note")
+    au.set_defaults(fn=cmd_audit)
 
     c = sub.add_parser("check-data", help="audit the dataset and write data/manifest.json")
     c.add_argument("--images", default="dataset/images")

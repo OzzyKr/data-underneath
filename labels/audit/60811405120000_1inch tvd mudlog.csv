@@ -1,0 +1,5 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+14995.58,15015.55,Sandstone,1789,1829,1inchtvd#1,claude-vision
+16159.85,16269.69,Clay/Shale,4121,4341,1inchtvd#2,claude-vision
+20379.6,20489.44,Sandstone,12573,12793,1inchtvd#5,claude-vision
+21021.65,21040.62,Siltstone,13859,13897,1inchtvd#6,claude-vision

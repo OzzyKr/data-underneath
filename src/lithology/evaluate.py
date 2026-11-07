@@ -168,3 +168,48 @@ def lofo_folds(doc_ids: list[str], family_of) -> list[tuple[str, list[str], list
 
 def majority(values: list[str]) -> str:
     return Counter(values).most_common(1)[0][0]
+
+
+# ------------------------------------------------------------------------------------------- eye audit
+# Spot labels made by looking at the scan (labels/audit/<doc_id>.csv): short windows in the middle of beds, each
+# with the rock a person (or Claude, source=claude-vision) reads from the column and legend. They are not complete
+# interval labels, so only naming is scored: the predicted name covering most of each window.
+
+FLAG_NOTE = "could not differentiate"
+
+
+@dataclass(frozen=True)
+class AuditScore:
+    n: int
+    correct: int  # predicted name equals the audited name (case/punctuation-insensitive)
+    flagged: int  # predicted bed is Unresolved or carries the "could not differentiate" note
+    confident_wrong: int  # wrong name presented as an answer (not flagged as a close call)
+
+    @property
+    def accuracy(self) -> float:
+        return self.correct / self.n if self.n else float("nan")
+
+
+def score_audit(pred_rows: list[dict[str, str]], audit_rows: list[dict[str, str]]) -> AuditScore:
+    """``pred_rows``: diagnostics CSV rows (with confidence, notes). ``audit_rows``: audit CSV rows."""
+    n = correct = flagged = confident_wrong = 0
+    for a in audit_rows:
+        y0, y1 = int(float(a["top_y"])), int(float(a["bottom_y"]))
+        cover: Counter = Counter()
+        info: dict[str, tuple[float, bool]] = {}
+        for p in pred_rows:
+            ov = min(y1, int(float(p["bottom_y"]))) - max(y0, int(float(p["top_y"])))
+            if ov > 0:
+                cover[p["lithology"]] += ov
+                flag = normalise_name(p["lithology"]) == "unresolved" or FLAG_NOTE in (p.get("notes") or "")
+                info[p["lithology"]] = (float(p.get("confidence") or 0), flag)
+        n += 1
+        if not cover:
+            continue
+        name = cover.most_common(1)[0][0]
+        _, flag = info[name]
+        ok = normalise_name(name) == normalise_name(a["lithology"])
+        correct += ok
+        flagged += flag
+        confident_wrong += (not ok) and not flag
+    return AuditScore(n, correct, flagged, confident_wrong)

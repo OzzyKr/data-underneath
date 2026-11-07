@@ -4,3 +4,4 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T16:28:03,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2 + template + abstain (example only labelled),1.0,300.0,0.1995,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T16:28:36,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2+template+abstain; lenient metric added,1.0,300.0,0.1995,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T16:28:58,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2+template+abstain; lenient metric,1.0,300.0,0.1995,0.3257,0.6159,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T20:16:42,e2bebd2-dirty,89788cf4acf0,1ae115030da8,dev,baseline e2bebd2 (fresh run),1.0,300.0,0.1995,0.3257,0.6159,0.8824,0.9375,0.9091,0.1159,0.8326

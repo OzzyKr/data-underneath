@@ -1,0 +1,7 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+10316.68,10426.58,Halite,3109,3329,mc822#1,claude-vision
+14746.96,14856.85,Slaty shale,11978,12198,mc822#2,claude-vision
+16747.54,16857.44,Clay-shale,15983,16203,mc822#3,claude-vision
+21541.47,21555.45,Medium sandstone,25580,25608,mc822#4,claude-vision
+22323.72,22383.66,Silty clay-shale,27146,27266,mc822#5,claude-vision
+24014.11,24124.0,Medium sandstone,30530,30750,mc822#6,claude-vision

@@ -1,0 +1,14 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+1712.26,1715.46,SILTSTONE,7987,8019,riolavaca#1,claude-vision
+1844.86,1848.26,SILTSTONE,9313,9347,riolavaca#2,claude-vision
+1875.26,1879.86,SILTSTONE,9617,9663,riolavaca#3,claude-vision
+1968.26,1978.86,SANDSTONE,10547,10653,riolavaca#4,claude-vision
+2614.05,2636.05,SALT,17005,17225,riolavaca#5,claude-vision
+3082.05,3084.45,SANDSTONE,21685,21709,riolavaca#6,claude-vision
+4259.25,4281.25,SANDSTONE,33457,33677,riolavaca#7,claude-vision
+6850.04,6852.24,LIMESTONE,59365,59387,riolavaca#11,claude-vision
+12723.03,12727.23,LIMESTONE,118095,118137,riolavaca#12,claude-vision
+15368.23,15390.23,SHALE,144547,144767,riolavaca#13,claude-vision
+15809.23,15831.23,LIMESTONE,148957,149177,riolavaca#14,claude-vision
+16923.42,16932.82,SHALE,160099,160193,riolavaca#15,claude-vision
+20061.22,20063.42,LIMESTONE,191477,191499,riolavaca#16,claude-vision

@@ -1,0 +1,13 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+3882.06,3907.93,CHALK,11939,12133,callaway#1,claude-vision
+4342.73,4346.73,SHALE,15394,15424,callaway#2,claude-vision
+4415.13,4444.47,SHALE,15937,16157,callaway#3,claude-vision
+4940.46,4945.26,SANDSTONE,19877,19913,callaway#4,claude-vision
+4949.53,4953.26,SANDSTONE,19945,19973,callaway#5,claude-vision
+5438.99,5468.33,SANDSTONE,23616,23836,callaway#6,claude-vision
+5667.4,5696.73,SHALE COLORED,25329,25549,callaway#7,claude-vision
+5849.66,5879.0,ANHYDRITE,26696,26916,callaway#8,claude-vision
+7793.13,7798.46,LIMESTONE,41272,41312,callaway#9,claude-vision
+8760.59,8763.53,SHALE GRAY,48528,48550,callaway#13,claude-vision
+8848.86,8852.06,SHALE GRAY,49190,49214,callaway#14,claude-vision
+9695.39,9702.59,DOLOMITIC LIMESTONE,55539,55593,callaway#16,claude-vision

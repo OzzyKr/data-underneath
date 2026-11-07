@@ -1,0 +1,8 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+11254.35,11276.34,Halite,57115,57335,mc776#1,claude-vision
+11890.83,11895.03,Argill limestone,63480,63522,mc776#2,claude-vision
+11895.83,11900.03,Halite,63530,63572,mc776#3,claude-vision
+13046.9,13068.89,Clay-shale,75041,75261,mc776#4,claude-vision
+18976.43,18998.43,Clay-shale,134338,134558,mc776#6,claude-vision
+20084.3,20091.5,Fine sandstone,145417,145489,mc776#7,claude-vision
+20160.7,20167.9,Fine sand,146181,146253,mc776#8,claude-vision

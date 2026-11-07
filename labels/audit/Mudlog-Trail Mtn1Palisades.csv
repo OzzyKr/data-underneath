@@ -1,0 +1,9 @@
+top_depth,bottom_depth,lithology,top_y,bottom_y,sample,source
+1723.2,1752.53,TUFF,3849,4069,trail#1,claude-vision
+2154.13,2183.46,TUFF,7081,7301,trail#2,claude-vision
+6861.2,6890.54,IGNEOUS,42384,42604,trail#3,claude-vision
+8897.33,8900.27,IGNEOUS,57655,57677,trail#4,claude-vision
+8905.33,8908.53,IGNEOUS,57715,57739,trail#5,claude-vision
+8934.4,8943.2,SHALE,57933,57999,trail#7,claude-vision
+9201.87,9227.48,IGNEOUS,59939,60131,trail#10,claude-vision
+9418.4,9422.67,SHALE,61563,61595,trail#11,claude-vision
