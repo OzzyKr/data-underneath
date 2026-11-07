@@ -94,4 +94,5 @@ layout:                      # STEP 1 of the pipeline: find the depth column, li
   max_track_mm: 25.0         # widest interpreted lithology track
   legend_title_bonus: 0.4    # a "Lithology symbols" / "Legend" / "Rock types" title in a header cell
   legend_unsnapped_penalty: 0.3  # a rock-word cluster no header frame holds (often spans the accessory list too)
-  lith_header_bonus: 1.5     # a "Lithology" / "Interp. Lith" header word above a track
+  lith_header_bonus: 3.0     # a "Lithology" / "Interp. Lith" header word above a track (strongest cue, AUROC 0.81)
+  lith_negative_header_penalty: 2.0  # a "Cuttings" / "% Lith" / "Description" header above a track

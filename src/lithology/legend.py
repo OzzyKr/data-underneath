@@ -6,6 +6,7 @@ example). The layout is decided per legend by which pairing explains more swatch
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from dataclasses import dataclass, field
@@ -317,6 +318,7 @@ def _one_indel(short: str, long: str) -> bool:
     return short[i:] == long[i + 1 :]
 
 
+@functools.lru_cache(maxsize=65536)
 def correct_word(word: str) -> str:
     """Fix OCR and print slips in a purely alphabetic word against known rock words.
 

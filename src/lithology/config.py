@@ -116,6 +116,7 @@ class LayoutConfig:
     legend_title_bonus: float
     legend_unsnapped_penalty: float
     lith_header_bonus: float
+    lith_negative_header_penalty: float
 
 
 @dataclass(frozen=True)

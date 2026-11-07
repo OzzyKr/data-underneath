@@ -60,6 +60,9 @@ def _docs_from(paths: list[str]) -> list[Document]:
 def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
     """Worker: one document in a fresh process (accurate peak memory, crash isolation)."""
     doc, config_path, out_dir, images = args
+    import os
+
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")  # several Tesseract processes run at once: no oversubscription
     from lithology.pipeline import process, write_outputs
 
     cfg = load_config(Path(config_path) if config_path else None)
@@ -570,6 +573,9 @@ def _vendor_of(doc_id: str, vendors: dict) -> str:
 
 def cmd_layout(a: argparse.Namespace) -> int:
     """Bonus: detect the three boxes without annotations; score against the annotations where they exist."""
+    import os
+
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
     import numpy as np
     from PIL import ImageDraw
 

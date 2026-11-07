@@ -39,8 +39,11 @@ from lithology.scale import _TESS_CONFIG, hypotheses
 
 log = logging.getLogger(__name__)
 
+# digits only, sparse text; no second inverted pass (low-confidence digits on fills would trigger it on every band)
+_DIGITS_CFG = _TESS_CONFIG + " -c tessedit_do_invert=0"
 _TITLE = re.compile(r"litholog|legend|symbol|rock\s*types?|lithologies", re.I)
 _BAD_HEADER = ("%", "desc", "cutt", "percent", "comment", "remark", "show")
+_NEG_HEADER = ("cutt", "%", "percent", "desc")
 _META = re.compile(
     r"operator|company|\bapi\b|scale|date|\bwell\b|county|field|elevation|spud|contractor|\brig\b|location|"
     r"state|country|permit|licen[cs]e|hole size|casing|mud type|logged by|geologist|prepared",
@@ -201,7 +204,41 @@ def vertical_edges(rows_rgb: np.ndarray, dpi: float) -> tuple[list[int], np.ndar
         else:
             edges.add(int(s))
             edges.add(int(e))
+    for x in fill_edges(rows_rgb, dpi):  # a coloured column often ends where its fill meets white paper (no rule)
+        edges.add(int(x))
     return sorted(edges), dark, rules
+
+
+def fill_edges(rows_rgb: np.ndarray, dpi: float, min_step: float = 0.3, min_col: float = 40.0) -> list[int]:
+    """x positions where the per-column fill fraction or mean fill colour changes sharply (non-max suppressed)."""
+    s = rows_rgb.astype(np.int16)
+    mn, mx = s.min(axis=2), s.max(axis=2)
+    fill = ((mn < 215) | ((mx - mn) > 35)) & (mx >= 90)  # coloured / grey fill, not black ink
+    f = fill.mean(axis=0).astype(np.float32)
+    cnt = fill.sum(axis=0)[:, None].astype(np.float32)
+    col = np.where(cnt > 0, (s * fill[..., None]).sum(axis=0) / np.maximum(cnt, 1), 255.0)  # mean fill RGB per x
+    d = max(2, int(round(_mm(dpi, 0.5))))  # non-max suppression radius
+    w = max(4, int(round(_mm(dpi, 1.5))))  # compare 1.5 mm means on each side: thin grid lines average out
+    W = len(f)
+    if len(f) <= 2 * w + 1:
+        return []
+    cf = np.concatenate([[0.0], np.cumsum(f, dtype=np.float64)])
+    cc = np.concatenate([np.zeros((1, 3)), np.cumsum(col, axis=0, dtype=np.float64)])
+    xs = np.arange(w, W - w)
+    left_f, right_f = (cf[xs] - cf[xs - w]) / w, (cf[xs + w] - cf[xs]) / w
+    left_c, right_c = (cc[xs] - cc[xs - w]) / w, (cc[xs + w] - cc[xs]) / w
+    step = np.zeros(W, np.float32)
+    step[xs] = np.abs(right_f - left_f)
+    cstep = np.zeros(W, np.float32)
+    cstep[xs] = np.linalg.norm(right_c - left_c, axis=1)
+    strength = np.maximum(step / min_step, cstep / min_col)
+    out: list[int] = []
+    for x in np.argsort(-strength):
+        if strength[x] < 1.0:
+            break
+        if all(abs(int(x) - o) > d for o in out):
+            out.append(int(x))
+    return sorted(out)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -216,7 +253,7 @@ def _ocr_numbers(arr: np.ndarray, rot: int) -> list[tuple[float, float, float, f
         pil = pil.transpose(Image.Transpose.ROTATE_90)
     elif rot == 270:
         pil = pil.transpose(Image.Transpose.ROTATE_270)
-    d = pytesseract.image_to_data(pil, config=_TESS_CONFIG, output_type=pytesseract.Output.DICT)
+    d = pytesseract.image_to_data(pil, config=_DIGITS_CFG, output_type=pytesseract.Output.DICT)
     out = []
     for t, c, x, y, bw, bh in zip(d["text"], d["conf"], d["left"], d["top"], d["width"], d["height"], strict=False):
         if float(c) < 0:  # Tesseract reports -1 for non-words; 0 is common for good digits on wide bands
@@ -235,6 +272,26 @@ def _ocr_numbers(arr: np.ndarray, rot: int) -> list[tuple[float, float, float, f
     return out
 
 
+def _rotation_score(found: list[tuple], dpi: float, cfg: LayoutConfig) -> int:
+    """How well a rotation's tokens line up as depth labels: best line-fit inlier count over x-clusters."""
+    full = sorted((x, y, v) for x, y, v, _ in found if v >= 100)
+    if len(full) < 2:
+        return len(full)
+    tol = cfg.depth_cluster_in * dpi
+    best, cur = 0, [full[0]]
+    for t in full[1:] + [(float("inf"), 0, 0)]:
+        if t[0] - cur[-1][0] <= tol:
+            cur.append(t)
+            continue
+        if len(cur) >= 2:
+            _, _, inl = _line_fit(
+                [(y, v) for _, y, v in cur], tol=max(5.0, 0.02 * float(np.median([v for *_, v in cur])))
+            )
+            best = max(best, inl)
+        cur = [t]
+    return best
+
+
 def number_tokens(
     img: Image.Image,
     top: int,
@@ -244,28 +301,50 @@ def number_tokens(
     fracs: np.ndarray | None = None,
     band_in: float | None = None,
     rots: list[int] | None = None,
-) -> list[tuple]:
+) -> tuple[list[tuple], list[int]]:
+    """Digit tokens (x, y, value, half-width) in body bands, and the label orientation(s) used.
+    Without ``rots`` the first band is read at 0/90/270 and the orientation whose tokens best fit a rising line is
+    kept (count fallback); the remaining bands are read concurrently (Tesseract runs as a subprocess)."""
+    from concurrent.futures import ThreadPoolExecutor
+
     W = img.size[0]
     bh = int((band_in or cfg.depth_band_in) * dpi)
     sc = 0.5 if dpi >= 300 else 1.0
-    rots = list(rots) if rots else [0, 90, 270]
-    toks = []
     fracs = np.linspace(0.12, 0.88, cfg.depth_bands) if fracs is None else fracs
-    for i, f in enumerate(fracs):
+    bands = []
+    for f in fracs:
         yc = int(top + f * (bot - top))
         a, b = max(top, yc - bh // 2), min(bot, yc + bh // 2)
-        if b - a < 20:
-            continue
-        band = _gray(crop_rgb(img, Box(0, a, W, b), scale=sc))
-        hits = {}
-        for r in rots:
-            found = _ocr_numbers(band, r)
-            hits[r] = len(found)
-            toks += [(x / sc, a + y / sc, v, hw / sc) for x, y, v, hw in found]
-        if i == 0 and any(hits.values()):  # keep the orientations that read numbers
-            best = max(hits.values())
-            rots = [r for r in rots if hits[r] >= max(1, 0.3 * best)]
-    return toks
+        if b - a >= 20:
+            bands.append((a, _gray(crop_rgb(img, Box(0, a, W, b), scale=sc))))
+    if not bands:
+        return [], list(rots or [0])
+
+    def read(a: int, band: np.ndarray, r: int) -> list[tuple]:
+        return [(x / sc, a + y / sc, v, hw / sc) for x, y, v, hw in _ocr_numbers(band, r)]
+
+    toks: list[tuple] = []
+    start = 0
+    if not rots:
+        # judge the orientation on the first two bands together; trust it only when >= 3 labels share one line
+        # (any two noise tokens "fit" a line); otherwise keep every orientation, so accuracy is never traded away
+        probe = bands[:2]
+        jobs0 = [(a, band, r) for a, band in probe for r in (0, 90, 270)]
+        with ThreadPoolExecutor(3) as ex:
+            outs = list(ex.map(lambda j: read(*j), jobs0))
+        by_rot: dict[int, list] = {0: [], 90: [], 270: []}
+        for (_, _, r), out in zip(jobs0, outs, strict=False):
+            by_rot[r] += out
+            toks += out
+        score = {r: _rotation_score(t, dpi, cfg) for r, t in by_rot.items()}
+        best = max(score.values())
+        rots = [r for r in (0, 90, 270) if score[r] >= 0.7 * best] if best >= 3 else [0, 90, 270]
+        start = len(probe)
+    jobs = [(a, band, r) for a, band in bands[start:] for r in rots]
+    with ThreadPoolExecutor(3) as ex:
+        for out in ex.map(lambda j: read(*j), jobs):  # map keeps the job order: identical token order
+            toks += out
+    return toks, list(rots)
 
 
 def _line_fit(pts: list[tuple[float, float]], tol: float, iters: int = 300) -> tuple[float | None, float, int]:
@@ -373,10 +452,15 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
     """x-centre and x-width of 'Lith...' header words, judged by their whole phrase ("% Lithology" and
     "Lithology Description" do not count). Vertical track headers are read from the strip above the body."""
     out = []
+    neg = []
 
     def take(phrases, to_x):
         for ph in phrases:
             text = " ".join(w[4] for w in ph).lower()
+            if any(z in text for z in _NEG_HEADER):  # "Cuttings", "% Lith", "Lithology description": not this track
+                for w in ph:
+                    neg.append(to_x(w))
+                continue
             if "lith" not in text or any(z in text for z in _BAD_HEADER):
                 continue
             for w in ph:
@@ -397,6 +481,20 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
                 take(_phrases(rw), lambda w: ((ws_ - 1 - (w[1] + w[3]) / 2) / s, (w[3] - w[1]) / s))
             else:  # k == 3: original x = v
                 take(_phrases(rw), lambda w: (((w[1] + w[3]) / 2) / s, (w[3] - w[1]) / s))
+        # horizontal headers with raw tokens: the legend word reader drops symbols, so "% Lithology" would otherwise
+        # read as "Lithology" (a positive anchor over the percent-lithology track)
+        d = pytesseract.image_to_data(Image.fromarray(strip), config="--psm 11", output_type=pytesseract.Output.DICT)
+        raw = [
+            (x / s, y / s, (x + w) / s, (y + h) / s, t.strip())
+            for t, c, x, y, w, h in zip(
+                d["text"], d["conf"], d["left"], d["top"], d["width"], d["height"], strict=False
+            )
+            if t.strip() and float(c) >= 0
+        ]
+        take(_phrases(raw), lambda w: ((w[0] + w[2]) / 2, w[2] - w[0]))
+    # a positive anchor sitting on a negative one is the same header read without its "%" / "Cuttings"
+    out = [(x, wd) for x, wd in out if not any(abs(x - nx) <= max(wd, nwd, 0.1 * dpi) for nx, nwd in neg)]
+    lith_anchors.negative = neg  # type: ignore[attr-defined]  # read by detect_boxes right after the call
     return out
 
 
@@ -567,6 +665,7 @@ def lith_candidates(
     palette: np.ndarray,
     anchors: list[tuple[float, float]],
     rules: list[tuple[int, int]] | None = None,
+    neg_anchors: list[tuple[float, float]] | None = None,
 ) -> list[dict]:
     lo, hi = _mm(dpi, 3.0), _mm(dpi, cfg.max_track_mm)
     s = rows_rgb.astype(np.int16)
@@ -626,6 +725,7 @@ def lith_candidates(
             outside = np.concatenate([nonwhite[:, max(0, a - 6) : max(0, a - 1)], nonwhite[:, b + 1 : b + 6]], axis=1)
             contrast = float(fill_r.mean() - (outside.mean() if outside.size else 0.0))
             header = float(any(a <= x <= b and wd <= 1.5 * w for x, wd in anchors))
+            negh = float(any(a <= x <= b and wd <= 1.5 * w for x, wd in neg_anchors or []))
             out.append(
                 {
                     "x0": a,
@@ -640,6 +740,7 @@ def lith_candidates(
                     "tex_fill": tex_fill,
                     "lr": lr,
                     "header": header,
+                    "neg_header": negh,
                 }
             )
     return out
@@ -688,12 +789,16 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     diag: dict = {"dpi": dpi, "body": [top, bot], "n_edges": len(edges)}
 
     # depth
-    toks = number_tokens(img, top, bot, dpi, cfg)
+    toks, rots = number_tokens(img, top, bot, dpi, cfg)
+    diag["depth_rotations"] = rots
     dcs = depth_candidates(toks, edges, dark, dpi, cfg, top, bot, W)
     if not dcs or dcs[0]["regular_only"] or dcs[0]["inliers"] < 4:
         # labels can be further apart than a band is tall (5 in/100 ft logs): read taller, interleaved bands too
         extra = np.linspace(0.12, 0.88, cfg.depth_bands) + 0.38 / max(1, cfg.depth_bands - 1)
-        toks += number_tokens(img, top, bot, dpi, cfg, fracs=np.clip(extra, 0.05, 0.95), band_in=2 * cfg.depth_band_in)
+        more, _ = number_tokens(
+            img, top, bot, dpi, cfg, fracs=np.clip(extra, 0.05, 0.95), band_in=2 * cfg.depth_band_in, rots=rots
+        )
+        toks += more
         dcs = depth_candidates(toks, edges, dark, dpi, cfg, top, bot, W)
         diag["depth_second_pass"] = True
     diag["depth"] = [{k: v for k, v in d.items()} for d in dcs[:3]]
@@ -741,6 +846,8 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
 
     # lithology
     anchors = lith_anchors(img, top, dpi, words)
+    neg_anchors = getattr(lith_anchors, "negative", [])
+    diag["neg_anchors"] = [[round(x), round(wd)] for x, wd in neg_anchors]
     diag["anchors"] = [[round(x), round(wd)] for x, wd in anchors]
     palette = legend_palette(img, legend) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
     bw_page = img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))
@@ -749,7 +856,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         band = max(2, int(0.03 * dpi))
         ys = np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top) - band, 300).astype(int)
         lrows = np.stack([_rows(img, np.arange(y, y + band)).min(axis=0) for y in ys])
-    lcs = lith_candidates(lrows, edges, dark, dpi, cfg, palette, anchors, rules)
+    lcs = lith_candidates(lrows, edges, dark, dpi, cfg, palette, anchors, rules, neg_anchors)
     if dcs:  # never let a depth candidate's labels sit inside a lithology candidate
         lx = dcs[0]["labels"]
         lcs = [c for c in lcs if min(c["x1"], lx[1]) - max(c["x0"], lx[0]) <= 2]
@@ -765,11 +872,19 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         cues = {"fill": 1.0, "homog": 1.0, "distinct": -1.0, "runs": -1.0, "spread": 1.0, "contrast": 0.5}
         if len(palette):
             cues["cov"] = 1.0
+    if not gated and not bw:  # nothing passes: relax the gates before falling back to every candidate
+        gated = [c for c in lcs if c["distinct"] <= 1.6 and c["fill"] >= 0.1 and (not len(palette) or c["cov"] >= 0.2)]
+    if not gated and not bw and len(palette):  # sparse patterns on white (e.g. "X X" igneous): legend colours decide
+        gated = [c for c in lcs if c["cov"] >= 0.5 and c["fill"] >= 0.05]
+    if not gated:  # last resort: anything but a blank strip
+        gated = [c for c in lcs if c["fill"] >= 0.05 or c["tex_fill"] >= 0.15]
+    if gated:  # the track under a "Lithology" header always competes, even if a cue gate rejected it
+        gated += [c for c in lcs if c["header"] and c not in gated]
     pool = gated or lcs
     if pool:
         _rank_sum(pool, cues)
         for c in pool:
-            c["score"] += cfg.lith_header_bonus * c["header"]
+            c["score"] += cfg.lith_header_bonus * c["header"] - cfg.lith_negative_header_penalty * c["neg_header"]
         pool.sort(key=lambda c: -c["score"])
         best = pool[0]
         lith = (best["x0"], top, best["x1"], bot)
