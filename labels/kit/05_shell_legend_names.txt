@@ -1,0 +1,21 @@
+Clay-S
+Limestone-L
+Others-H
+Others-S
+Others-V
+Sand-FSS
+Sand-MS
+Sand-MSS
+bit change
+casing
+deviation
+dry
+fresh water
+gas
+marker
+mud gain
+mud loss
+oil
+oil and gas
+salted water
+short trip

@@ -1,0 +1,29 @@
+Casing shoe
+Clay-CCS
+Clay-M
+Clay-S
+Clay-SACS
+Clay-SCS
+Core
+Dolomites-CD
+Dolomites-D
+FIT
+Fossils
+Limestone-AL
+Limestone-L
+Limestone-SL
+Mud gain
+Mud loss
+Others-A
+Others-CL
+Others-E
+Others-GY
+Others-H
+Sand-CS
+Sand-FS
+Sand-FSS
+Sand-MS
+Sand-MSS
+Sand-SIS
+Sand-SS
+Survey

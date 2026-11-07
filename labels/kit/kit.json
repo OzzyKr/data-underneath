@@ -1,0 +1,121 @@
+[
+  {
+    "key": "01_mc765",
+    "doc_id": "MC765_P011_ST00BP00_5inchMD_Depth_MudLog_3686-20707ft",
+    "split": "dev",
+    "window_top_ft": 20424.7,
+    "window_bottom_ft": 20624.7,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      3338.7587562236868,
+      3438.615518571325
+    ],
+    "column_y0": 1623,
+    "column_y1": 174871
+  },
+  {
+    "key": "02_rio",
+    "doc_id": "Rio_Nueces_3744_Unit_1_212_MUD_5IN",
+    "split": "dev",
+    "window_top_ft": 9389.8,
+    "window_bottom_ft": 9589.8,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      8413.512259954188,
+      8513.512198193099
+    ],
+    "column_y0": 6861,
+    "column_y1": 120865
+  },
+  {
+    "key": "03_shenzi",
+    "doc_id": "60811405350100_shenzi-sb203-st00bp01_mudlog_4320-27400",
+    "split": "dev",
+    "window_top_ft": 20263.0,
+    "window_bottom_ft": 20663.0,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      3515.4328398141265,
+      3848.7233719338137
+    ],
+    "column_y0": 2363,
+    "column_y1": 71702
+  },
+  {
+    "key": "04_mc761",
+    "doc_id": "60817411400100_mc761_1_st1_mudlog_1md_17133_22886",
+    "split": "dev",
+    "window_top_ft": 20779.3,
+    "window_bottom_ft": 21179.3,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      15669.509787322046,
+      16169.609248712575
+    ],
+    "column_y0": 2859,
+    "column_y1": 14459
+  },
+  {
+    "key": "05_shell",
+    "doc_id": "Shell_AC0336_OCS-G-36102_001_ST00BP01_5inchMD_MudLog_9100 ft -27770 ft",
+    "split": "holdout",
+    "window_top_ft": 19660.7,
+    "window_bottom_ft": 19860.7,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      8850.398534097409,
+      8983.549663209216
+    ],
+    "column_y0": 1129,
+    "column_y1": 142323
+  },
+  {
+    "key": "06_xom",
+    "doc_id": "60812401020000_xom_ocs-g_20351_ju103_st00bp00_mudlog_10200-30900ft_5in_tvd",
+    "split": "holdout",
+    "window_top_ft": 24810.2,
+    "window_bottom_ft": 25010.2,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      10043.41737256904,
+      10143.274338331297
+    ],
+    "column_y0": 1576,
+    "column_y1": 208873
+  },
+  {
+    "key": "07_neptune",
+    "doc_id": "60818400650000_at0574_4_neptune_1inch_tvdmudlog_6300-17378",
+    "split": "holdout",
+    "window_top_ft": 9382.7,
+    "window_bottom_ft": 9782.7,
+    "knots_y": [
+      0.0,
+      1000.0
+    ],
+    "knots_depth": [
+      5403.735935664302,
+      5736.791302155628
+    ],
+    "column_y0": 2699,
+    "column_y1": 36050
+  }
+]

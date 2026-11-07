@@ -1,0 +1,24 @@
+Anhydrite
+Background Gas
+Chert
+Clay/Shale
+Coal-lignite
+Conglomeratic
+Connection Gas
+Dolomite
+Formation Gas
+Gas
+Granite
+Limestone
+Marl
+Mud gain
+Mud loss
+Oil
+Oil and Gas
+Pumps Off Gas
+Sandstone
+Shale
+Shoe
+Siltstone
+Tuff
+galt

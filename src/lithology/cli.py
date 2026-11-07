@@ -265,6 +265,45 @@ def cmd_check_data(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def cmd_labels_make(a: argparse.Namespace) -> int:
+    from lithology.labelkit import make_item, save_manifest
+
+    cfg = load_config(Path(a.config) if a.config else None)
+    sel = yaml.safe_load(Path(a.selection).read_text())["documents"]
+    docs = discover(Path(a.images)).documents
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    items = []
+    for s in sel:
+        doc = next((d for d in docs if d.doc_id.startswith(s["prefix"])), None)
+        if doc is None:
+            log.error("no document matches prefix %r", s["prefix"])
+            return 2
+        item = make_item(doc, s["key"], s["split"], cfg, out)
+        log.info(
+            "%-12s %-8s %6.0f-%6.0f ft  %s",
+            item.key,
+            item.split,
+            item.window_top_ft,
+            item.window_bottom_ft,
+            doc.doc_id[:60],
+        )
+        items.append(item)
+    save_manifest(items, out)
+    log.info("kit written to %s", out)
+    return 0
+
+
+def cmd_labels_import(a: argparse.Namespace) -> int:
+    from lithology.labelkit import import_kit
+
+    problems = import_kit(Path(a.kit), Path(a.labels))
+    for p in problems:
+        log.warning(p)
+    log.info("imported labels into %s (%d problems)", a.labels, len(problems))
+    return 1 if problems else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lith", description="Lithology interval extraction from well-log scans")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -290,6 +329,18 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("check-data", help="audit the dataset and write data/manifest.json")
     c.add_argument("--images", default="dataset/images")
     c.set_defaults(fn=cmd_check_data)
+
+    lm = sub.add_parser("labels-make", help="build the hand-labelling kit (pictures + draft CSVs)")
+    lm.add_argument("--selection", default="labels/selection.yaml")
+    lm.add_argument("--images", default="dataset/images")
+    lm.add_argument("--out", default="labels/kit")
+    lm.add_argument("--config")
+    lm.set_defaults(fn=cmd_labels_make)
+
+    li = sub.add_parser("labels-import", help="turn corrected kit CSVs into label files")
+    li.add_argument("--kit", default="labels/kit")
+    li.add_argument("--labels", default="labels")
+    li.set_defaults(fn=cmd_labels_import)
 
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(levelname)s %(message)s")

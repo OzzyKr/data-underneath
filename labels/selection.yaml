@@ -1,0 +1,14 @@
+# Logs chosen for hand labelling: one per family, mixing colour / black-and-white, 1 in / 5 in scales and
+# different vendors. "dev" labels are used while improving the pipeline; "holdout" labels stay untouched until
+# the freeze and are scored once. The organisers' example (example/example.csv) is an extra dev label.
+#
+# Holdout logs come only from families never inspected during development (their legends and columns were not
+# looked at while building the pipeline), so the holdout score is an honest estimate for unseen test logs.
+documents:
+  - {key: 01_mc765, prefix: "MC765_P011_ST00BP00_5inchMD", split: dev}
+  - {key: 02_rio, prefix: "Rio_Nueces_3744_Unit_1_212", split: dev}
+  - {key: 03_shenzi, prefix: "60811405350100", split: dev}
+  - {key: 04_mc761, prefix: "60817411400100_mc761_1_st1_mudlog_1md", split: dev}
+  - {key: 05_shell, prefix: "Shell_AC0336", split: holdout}
+  - {key: 06_xom, prefix: "60812401020000_xom", split: holdout}
+  - {key: 07_neptune, prefix: "60818400650000_at0574", split: holdout}

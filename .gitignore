@@ -25,3 +25,6 @@ data/cache/
 # Stage 2 front end
 node_modules/
 dashboard/dist/
+
+# Generated pictures are rebuilt with `lith labels-make`; the CSVs are the labels.
+labels/kit/*.png
