@@ -160,6 +160,8 @@ class LegendEntry:
     swatch: Box  # full-image pixels
     ocr_confidence: float = 0.0
     is_rock: bool = True  # False for drilling/show symbols and modifier words (never used to name intervals)
+    rgb: tuple[int, int, int] | None = None  # swatch fill colour (median of non-ink pixels)
+    chroma: float = 0.0  # max - min of ``rgb``: ~0 for black-and-white legends
 
 
 @dataclass

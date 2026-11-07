@@ -61,3 +61,32 @@ def test_golden_example_regression(cfg):
     assert s.depth_mae_ft < 0.5
     assert s.boundary_f1 >= 0.85
     assert s.cluster_ari >= 0.75
+
+
+@needs_tesseract
+def test_step_hook_and_legend_json(synth_dataset, synth_doc, cfg, tmp_path):
+    """Live runs need step progress; the dashboard needs each swatch's fill colour."""
+    import json
+
+    from lithology.pipeline import write_outputs
+
+    doc = discover(synth_dataset / "images").documents[0]
+    steps: list[str] = []
+    res = process(doc, cfg, on_step=steps.append)
+    assert res.ok, res.error
+    assert steps == ["load", "scale", "segment", "cluster", "legend", "assemble"]
+    write_outputs(doc, res, tmp_path, cfg, image=False)
+    legend = json.loads((tmp_path / "diagnostics" / f"{doc.doc_id}_legend.json").read_text())
+    by_label = {e["label"]: e for e in legend}
+    sand = by_label["Sandstone"]
+    assert sand["chroma"] > 100 and sand["rgb"][2] < 120  # yellow fill, not the black dots
+    assert by_label["Siltstone"]["chroma"] < 20  # grey swatch
+
+
+def test_step_hook_errors_do_not_fail_the_document(synth_dataset, cfg):
+    def boom(_name: str) -> None:
+        raise RuntimeError("progress reporter broke")
+
+    doc = discover(synth_dataset / "images").documents[0]
+    res = process(doc, cfg, on_step=boom)
+    assert res.error is None or "progress" not in res.error

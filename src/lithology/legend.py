@@ -511,6 +511,23 @@ def swatch_descriptor(rgb_full_swatch: np.ndarray, ink_luma: int) -> np.ndarray:
     return match_descriptor(inner, ink_luma)
 
 
+def swatch_colour(rgb_full_swatch: np.ndarray, ink_luma: int) -> tuple[tuple[int, int, int], float]:
+    """Fill colour of a swatch (median of its interior's non-ink pixels) and its chroma (max - min channel).
+
+    A coloured swatch with a black pattern gives its fill; a black-and-white swatch gives white (chroma ~0); a
+    solid dark swatch (coal, "Others-CL") falls back to the median of all its pixels.
+    """
+    h, w = rgb_full_swatch.shape[:2]
+    my, mx = max(1, int(h * 0.15)), max(1, int(w * 0.15))
+    inner = rgb_full_swatch[my : h - my, mx : w - mx] if h > 2 * my + 2 and w > 2 * mx + 2 else rgb_full_swatch
+    px = inner.reshape(-1, 3).astype(np.float32)
+    luma = px @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    keep = px[luma > ink_luma]
+    med = np.median(keep if len(keep) >= max(4, len(px) // 20) else px, axis=0)
+    r, g, b = (int(round(v)) for v in med)
+    return (r, g, b), float(max(r, g, b) - min(r, g, b))
+
+
 @dataclass(frozen=True)
 class Match:
     swatch: int  # index into the legend entries

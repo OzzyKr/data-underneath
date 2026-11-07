@@ -8,7 +8,7 @@ import resource
 import sys
 import time
 import traceback
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -19,7 +19,7 @@ from lithology.cluster import cluster_intervals, merge_adjacent
 from lithology.config import Config
 from lithology.features import match_descriptor
 from lithology.io import Document, crop_rgb, image_dpi, open_image
-from lithology.legend import match_distances, read_legend, swatch_descriptor
+from lithology.legend import match_distances, read_legend, swatch_colour, swatch_descriptor
 from lithology.models import Box, DocumentBoxes, DocumentResult, Interval
 from lithology.naming import decide, template_similarity, unresolved_note
 from lithology.render import render_annotated, write_csv
@@ -37,8 +37,13 @@ def peak_rss_mb() -> float:
     return r / 1e6 if sys.platform == "darwin" else r / 1e3
 
 
+StepHook = Callable[[str], None]
+
+
 @contextmanager
-def _timed(timings: dict[str, float], name: str) -> Generator[None, None, None]:
+def _timed(timings: dict[str, float], name: str, on_step: StepHook | None = None) -> Generator[None, None, None]:
+    if on_step is not None:
+        on_step(name)  # progress for live runs (the dashboard); must never break the pipeline
     t = time.perf_counter()
     try:
         yield
@@ -80,11 +85,25 @@ def _cluster_patches(column: np.ndarray, filled: list, ids: np.ndarray, c: int, 
     return out
 
 
-def process(doc: Document, cfg: Config, boxes: DocumentBoxes | None = None) -> DocumentResult:
-    """Extract intervals for one document. Never raises: errors are recorded on the result."""
+def process(
+    doc: Document, cfg: Config, boxes: DocumentBoxes | None = None, on_step: StepHook | None = None
+) -> DocumentResult:
+    """Extract intervals for one document. Never raises: errors are recorded on the result.
+
+    ``on_step(name)`` is called as each step starts (load, scale, segment, cluster, legend, assemble).
+    """
     res = DocumentResult(doc_id=doc.doc_id, intervals=[])
+
+    def hook(name: str) -> None:
+        if on_step is None:
+            return
+        try:
+            on_step(name)
+        except Exception:  # a progress reporter must not fail the document
+            log.debug("step hook failed", exc_info=True)
+
     try:
-        _process(doc, cfg, boxes, res)
+        _process(doc, cfg, boxes, res, hook)
     except Exception as e:  # the batch must survive any single document
         res.error = f"{type(e).__name__}: {e}"
         log.error("%s failed: %s\n%s", doc.doc_id, res.error, traceback.format_exc())
@@ -92,9 +111,11 @@ def process(doc: Document, cfg: Config, boxes: DocumentBoxes | None = None) -> D
     return res
 
 
-def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: DocumentResult) -> None:
+def _process(
+    doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: DocumentResult, hook: StepHook | None = None
+) -> None:
     t = res.timings_s
-    with _timed(t, "load"):
+    with _timed(t, "load", hook):
         img = open_image(doc.image_path)
         if boxes is None:
             ann = doc.annotation()
@@ -104,28 +125,33 @@ def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: Docum
         res.boxes = boxes
         lc = boxes.lithology_column.clip(*img.size)
 
-    with _timed(t, "scale"):
+    with _timed(t, "scale", hook):
         scale, warns = estimate_scale(img, boxes.depth_column, doc.doc_id, cfg.scale)
         res.scale = scale
         res.warnings += warns
         px_per_ft = scale.px_per_ft if scale else (prior_px_per_ft(img, doc.doc_id) or DEFAULT_PX_PER_FT)
 
-    with _timed(t, "segment"):
+    with _timed(t, "segment", hook):
         xa, xb = core_box_x(lc.x0, lc.x1, cfg.segment.core_width_fraction)
         column = crop_rgb(img, Box(xa, lc.y0, xb, lc.y1))
         seg = segment_column(column, px_per_ft, cfg.segment)
         filled = [s for s in seg.segments if not s.blank]
 
-    with _timed(t, "cluster"):
+    with _timed(t, "cluster", hook):
         desc = interval_descriptors(seg, filled) if filled else np.zeros((0, 12))
         ids = cluster_intervals(desc, seg.scaler, cfg.cluster)
 
-    with _timed(t, "legend"):
+    with _timed(t, "legend", hook):
         entries = []
         try:
             lg = boxes.legend.clip(*img.size)
             legend_rgb = crop_rgb(img, lg)
             entries = read_legend(legend_rgb, (lg.x0, lg.y0), image_dpi(img) or 200.0, cfg.legend)
+            for e in entries:  # fill colour of every swatch, for the dashboard's rock colours
+                sw = e.swatch
+                e.rgb, e.chroma = swatch_colour(
+                    legend_rgb[sw.y0 - lg.y0 : sw.y1 - lg.y0, sw.x0 - lg.x0 : sw.x1 - lg.x0], cfg.segment.ink_luma
+                )
         except Exception as e:  # a legend failure must not lose the intervals
             res.warnings.append(f"legend read failed: {type(e).__name__}: {e}")
         res.legend = entries
@@ -205,7 +231,7 @@ def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: Docum
             res.warnings.append("no legend entries read; intervals named by cluster")
         del column
 
-    with _timed(t, "assemble"):
+    with _timed(t, "assemble", hook):
         merged = merge_adjacent([s.top for s in filled], [s.bottom for s in filled], ids.tolist())
         intervals = []
         for top, bottom, c in merged:
@@ -231,6 +257,18 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
     write_csv(res.intervals, out_dir / f"{doc.doc_id}.csv")
     write_csv(res.intervals, out_dir / "diagnostics" / f"{doc.doc_id}.csv", with_diagnostics=True)
     (out_dir / "diagnostics" / f"{doc.doc_id}_naming.json").write_text(json.dumps(res.naming, indent=1))
+    legend = [
+        {
+            "label": e.label,
+            "swatch": list(e.swatch.as_tuple()),
+            "is_rock": e.is_rock,
+            "ocr_confidence": round(e.ocr_confidence, 3),
+            "rgb": list(e.rgb) if e.rgb else None,
+            "chroma": round(e.chroma, 1),
+        }
+        for e in res.legend
+    ]
+    (out_dir / "diagnostics" / f"{doc.doc_id}_legend.json").write_text(json.dumps(legend, indent=1))
     if image and res.boxes is not None:
         img = open_image(doc.image_path)
         title = f"{doc.doc_id}  |  {len(res.intervals)} intervals"
