@@ -30,6 +30,7 @@ segment:
   ink_luma: 110              # pixels darker than this (0-255) count as pattern ink / lines
   blank_ink_fraction: 0.004  # a block with less ink than this AND near-white fill is blank paper
   blank_fill_luma: 240
+  snap_to_gap: true         # same-fill (pattern) boundaries go to the blank gap between the two patterns' marks
 
 cluster:
   distance_threshold: 0.6    # agglomerative merge threshold (weighted RMS distance in noise units)

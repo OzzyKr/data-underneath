@@ -407,3 +407,22 @@ def test_stacked_swatches_one_pixel_apart_stay_separate():
     boxes = _swatch_candidates(gray, [], min_px=8, content=gray < 200)
     assert len(boxes) == 11
     assert all(b.height == 45 and b.width == 67 for b in boxes)
+
+
+def test_snap_to_gap_moves_pattern_edges_into_the_gap_and_survives_column_ends():
+    import numpy as np
+
+    from lithology.features import FeatureScaler, describe_ranges, row_stats
+    from lithology.segment import snap_to_gap
+
+    col = np.full((200, 40, 3), 255, np.uint8)
+    for y in range(0, 100, 20):  # bed A: a dash row every 20 rows
+        col[y + 8 : y + 11, 5:35] = 0
+    for y in range(110, 200, 6):  # bed B: vertical bars, starting at row 110 (gap 91..109)
+        col[y : y + 4, 5:35:6] = 0
+    stats = row_stats(col, 110)
+    starts = np.arange(0, 180, 20)
+    scaler = FeatureScaler.from_blocks(describe_ranges(stats, starts, starts + 20))
+    edge = snap_to_gap(stats, scaler, 92, 20, 20)  # refinement left the edge on A's last dash row
+    assert 95 <= edge <= 108
+    assert snap_to_gap(stats, scaler, 195, 20, 20) == 195  # near the end of the column: unchanged, no crash

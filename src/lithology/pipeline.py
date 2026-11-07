@@ -33,7 +33,7 @@ from lithology.naming import (
 )
 from lithology.render import render_annotated, write_csv
 from lithology.scale import estimate_scale, prior_px_per_ft
-from lithology.segment import core_box_x, interval_descriptors, segment_column
+from lithology.segment import core_box_x, interval_descriptors, segment_column, snap_to_gap
 
 log = logging.getLogger(__name__)
 
@@ -289,6 +289,13 @@ def _process(
 
     with _timed(t, "assemble", hook):
         merged = merge_adjacent([s.top for s in filled], [s.bottom for s in filled], ids.tolist())
+        if cfg.segment.snap_to_gap:  # final bed edges only: grouping above is unchanged
+            merged = [list(m) for m in merged]
+            for a, b in zip(merged[:-1], merged[1:], strict=True):
+                lo, hi = a[0] + 2, b[1] - 2
+                if a[1] == b[0] and hi > lo:  # touching beds of different groups, not slivers
+                    edge = snap_to_gap(seg.stats, seg.scaler, a[1], seg.block_px, seg.block_px)
+                    a[1] = b[0] = min(max(edge, lo), hi)
         intervals = []
         for top, bottom, c in merged:
             y0, y1 = lc.y0 + top, lc.y0 + bottom

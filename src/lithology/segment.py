@@ -65,6 +65,46 @@ def _refine(
     return int(cand[int(np.argmax(score))])
 
 
+def snap_to_gap(stats: RowStats, scaler: FeatureScaler, row: int, radius: int, w: int) -> int:
+    """Put a pattern boundary in the blank gap between two patterns' marks, not on a row of marks.
+
+    Drawn patterns change between the last mark of one bed and the first mark of the next, so the boundary is in
+    the ink-free gap between them. Refinement on ~1 ft windows can land on a mark row instead (half a pattern
+    period off, ~0.7 ft on the example log). Only same-fill boundaries move: a fill-colour change is sharp and
+    already placed exactly. Among the gaps within ``radius``, the one whose centre best separates the windows
+    above and below wins (same score as ``_refine``).
+    """
+    lo, hi = max(w, row - radius), min(stats.n_rows - w, row + radius)
+    if hi <= lo or row - w < 0 or row + w > stats.n_rows:  # too close to the column's ends to compare
+        return row
+
+    def fill(a: int, b: int) -> np.ndarray:
+        paper = (b - a) * stats.width - (stats.p_ink[b] - stats.p_ink[a])
+        return (stats.p_fill_rgb[b] - stats.p_fill_rgb[a]) / max(paper, 1)
+
+    if np.abs(fill(row - w, row) - fill(row, row + w)).max() > 20:  # a colour boundary
+        return row
+    ink = np.diff(stats.p_ink[lo : hi + 2]) / stats.width  # ink fraction of rows lo..hi
+    blank = ink <= 0.01
+    centres, k = [], 0
+    while k < len(blank):
+        if blank[k]:
+            j = k
+            while j < len(blank) and blank[j]:
+                j += 1
+            if j - k >= 2:
+                centres.append(lo + (k + j) // 2)
+            k = j
+        else:
+            k += 1
+    if not centres:
+        return row
+    cand = np.array(centres)
+    above = scaler.transform(describe_ranges(stats, cand - w, cand))
+    below = scaler.transform(describe_ranges(stats, cand, cand + w))
+    return int(cand[int(np.argmax(np.linalg.norm(above - below, axis=1)))])
+
+
 def _absorb_thin(stats: RowStats, scaler: FeatureScaler, rows: list[int], min_px: int) -> list[int]:
     """Merge segments thinner than ``min_px`` into the more similar neighbour (thinnest first)."""
     rows = list(rows)

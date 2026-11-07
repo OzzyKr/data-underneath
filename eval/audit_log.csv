@@ -8,3 +8,6 @@ timestamp,commit,config_hash,pred,note,n,correct,accuracy,flagged,confident_wron
 2026-11-07T20:45:33,b7485f7-dirty,3d00a0c0ba71,out,"e_rules (strokes+unanimity+split-only variants+colour filter), out/ run",91,80,0.8791,20,3
 2026-11-07T20:56:14,b7485f7-dirty,3d00a0c0ba71,out,similar-types category (status column); same naming as e_rules,91,80,0.8791,20,3
 2026-11-07T21:06:33,da1cffe-dirty,3d00a0c0ba71,out,stacked swatches recovered from fused blobs (GC297),91,80,0.8791,20,3
+2026-11-07T21:14:51,b17de96-dirty,b9832109b215,tier1,ablation: ResNet off (ai.tier 1),91,80,0.8791,22,3
+2026-11-07T21:20:24,b17de96-dirty,d33ac173a4ce,out,snap final same-fill bed edges to blank gaps,91,80,0.8791,20,3
+2026-11-07T21:25:38,b17de96-dirty,d33ac173a4ce,out,snap edges + end-of-column guard,91,80,0.8791,20,3

@@ -43,6 +43,7 @@ class SegmentConfig:
     ink_luma: int
     blank_ink_fraction: float
     blank_fill_luma: int
+    snap_to_gap: bool = True
 
 
 @dataclass(frozen=True)

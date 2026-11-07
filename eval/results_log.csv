@@ -10,3 +10,8 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T20:45:34,b7485f7-dirty,3d00a0c0ba71,1ae115030da8,dev,e_rules out/ run,1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T20:56:15,b7485f7-dirty,3d00a0c0ba71,1ae115030da8,dev,similar-types category,1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T21:06:34,da1cffe-dirty,3d00a0c0ba71,1ae115030da8,dev,stacked swatches recovered (GC297),1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T21:14:23,b17de96-dirty,d33ac173a4ce,1ae115030da8,all,trial: snap pattern boundaries to blank gaps (example only),1.0,300.0,0.8222,0.9549,0.0,0.7778,0.875,0.8235,0.1162,0.8702
+2026-11-07T21:14:53,b17de96-dirty,b9832109b215,1ae115030da8,dev,ablation: ResNet off,1.0,300.0,0.1995,0.3257,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T21:15:27,b17de96-dirty,d33ac173a4ce,1ae115030da8,all,trial: snap final bed edges to blank gaps (example only),1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-07T21:20:25,b17de96-dirty,d33ac173a4ce,1ae115030da8,dev,snap final same-fill bed edges to blank gaps,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-07T21:25:39,b17de96-dirty,d33ac173a4ce,1ae115030da8,dev,snap edges + end-of-column guard,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
