@@ -6,13 +6,43 @@ import { useIntervals, useLog, type Interval, type LogDetail } from "../api";
 import { fmt, rememberLog } from "../format";
 import { Dot, ErrorNote } from "../components/ui";
 import StripLog, { type Span } from "../viewer/StripLog";
+import PageView, { type Fit } from "../viewer/PageView";
 
+type View = "column" | "wide" | "page";
+
+const VIEWS: { id: View; label: string; title: string }[] = [
+  { id: "column", label: "Column", title: "Lithology column" },
+  { id: "wide", label: "Full scan", title: "Full scan" },
+  { id: "page", label: "Whole page", title: "Whole page" },
+];
 const SPANS: { id: Span; label: string }[] = [
   { id: 50, label: "50 ft" },
   { id: 200, label: "200 ft" },
   { id: 1000, label: "1,000 ft" },
   { id: "all", label: "Whole log" },
 ];
+const FITS: { id: Fit; label: string }[] = [
+  { id: "width", label: "Fit width" },
+  { id: "page", label: "Fit page" },
+];
+
+function Segmented<T extends string | number>({ label, items, value, onChange }: { label: string; items: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+  return (
+    <div role="group" aria-label={label} className="flex rounded-lg bg-panel p-[3px]">
+      {items.map((it) => (
+        <button
+          key={String(it.id)}
+          type="button"
+          aria-pressed={value === it.id}
+          onClick={() => onChange(it.id)}
+          className={`h-8 rounded-md px-3 text-xs transition-colors ${value === it.id ? "bg-line-2 text-ink" : "text-muted hover:text-ink"}`}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function ImagePage() {
   const { logId } = useParams();
@@ -22,7 +52,8 @@ export default function ImagePage() {
   const { data: intervals } = useIntervals(logId);
   const spanParam = params.get("span");
   const span: Span = spanParam === "all" ? "all" : spanParam === "50" ? 50 : spanParam === "1000" ? 1000 : 200;
-  const context = params.get("full") === "1";
+  const view: View = params.get("view") === "wide" ? "wide" : params.get("view") === "page" ? "page" : "column";
+  const fit: Fit = params.get("fit") === "page" ? "page" : "width";
   const setParam = useCallback(
     (key: string, value: string | null) =>
       setParams(
@@ -36,60 +67,57 @@ export default function ImagePage() {
       ),
     [setParams],
   );
-  const setSpan = (s: Span) => setParam("span", s === 200 ? null : String(s));
-  const setContext = (on: boolean) => setParam("full", on ? "1" : null);
   const [range, setRange] = useState<[number | null, number | null]>([null, null]);
   const [depthInput, setDepthInput] = useState("");
   const [jump, setJump] = useState<{ depth: number; n: number } | null>(null);
 
   useEffect(() => {
     if (logId) rememberLog(logId);
+    setRange([null, null]);
   }, [logId]);
 
   const select = useCallback((idx: number) => setParam("i", String(idx)), [setParam]);
   const onView = useCallback((a: number | null, b: number | null) => setRange([a, b]), []);
+  const setView = (v: View) => {
+    setJump(null); // a fresh view opens where it should, not at an old "go to"
+    setParam("view", v === "column" ? null : v);
+  };
+  const openAt = (depth: number) => {
+    setParam("view", null);
+    setJump({ depth, n: (jump?.n ?? 0) + 1 });
+  };
 
   if (error) return <div className="p-12"><ErrorNote error={error} /></div>;
   if (!log || !intervals) return null;
   const sel = intervals.find((r) => r.idx === selected) ?? null;
   const ready = log.tiles?.col && log.boxes;
+  const title = VIEWS.find((v) => v.id === view)!.title;
 
   return (
     <div className="mx-auto flex max-w-[1320px] flex-col gap-5 px-6 pb-8 pt-7 lg:px-10">
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold tracking-tight">Lithology column</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <span className="tabular text-[13px] text-muted">
-            {range[0] != null && range[1] != null ? `${fmt(range[0])} – ${fmt(range[1])} ft in view` : log.title} · {fmt(intervals.length)} beds
+            {view === "page"
+              ? "The scan as delivered · hover for depth, click to open the column there"
+              : range[0] != null && range[1] != null
+                ? `${fmt(range[0])} – ${fmt(range[1])} ft in view · ${fmt(intervals.length)} beds`
+                : `${log.title} · ${fmt(intervals.length)} beds`}
           </span>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2.5">
-          <div role="group" aria-label="Feet per screen" className="flex rounded-lg bg-panel p-[3px]">
-            {SPANS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                aria-pressed={span === s.id}
-                onClick={() => setSpan(s.id)}
-                className={`h-8 rounded-md px-3 text-xs transition-colors ${span === s.id ? "bg-line-2 text-ink" : "text-muted hover:text-ink"}`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            aria-pressed={context}
-            onClick={() => setContext(!context)}
-            className={`h-[38px] rounded-lg px-3 text-xs transition-colors ${context ? "bg-line-2 text-ink" : "bg-panel text-muted hover:text-ink"}`}
-          >
-            Full scan
-          </button>
+          <Segmented label="View" items={VIEWS} value={view} onChange={setView} />
+          {view === "page" ? (
+            <Segmented label="Fit" items={FITS} value={fit} onChange={(f) => setParam("fit", f === "width" ? null : f)} />
+          ) : (
+            <Segmented label="Feet per screen" items={SPANS} value={span} onChange={(s) => setParam("span", s === 200 ? null : String(s))} />
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               const v = Number(depthInput.replace(/[, ]/g, ""));
-              if (Number.isFinite(v)) setJump({ depth: v, n: (jump?.n ?? 0) + 1 });
+              if (Number.isFinite(v)) openAt(v);
             }}
             className="flex h-[38px] items-center gap-2 rounded-lg bg-panel px-3 text-xs text-faint"
           >
@@ -112,12 +140,30 @@ export default function ImagePage() {
           aria-label="Scan and predicted beds"
           className="flex h-[calc(100vh-180px)] min-h-[540px] min-w-0 grow-[999] basis-[620px] overflow-hidden rounded-xl border border-line bg-nav"
         >
-          {ready ? (
-            <StripLog log={log} intervals={intervals} selected={selected} onSelect={select} span={span} context={context} jump={jump} onView={onView} />
-          ) : (
+          {!ready ? (
             <p className="m-auto max-w-sm text-center text-sm text-muted">
               No scan tiles for this log. Run <code className="font-mono">lith dash-build --rebuild-tiles</code> with the dataset present.
             </p>
+          ) : view === "page" ? (
+            log.tiles?.page ? (
+              <PageView key={`page-${log.log_id}`} log={log} intervals={intervals} selected={selected} onSelect={select} fit={fit} focus={range} onOpen={openAt} />
+            ) : (
+              <p className="m-auto max-w-sm text-center text-sm text-muted">
+                No whole-page tiles yet. Run <code className="font-mono">lith dash-build --rebuild-tiles</code>.
+              </p>
+            )
+          ) : (
+            <StripLog
+              key={`col-${log.log_id}`}
+              log={log}
+              intervals={intervals}
+              selected={selected}
+              onSelect={select}
+              span={span}
+              context={view === "wide"}
+              jump={jump}
+              onView={onView}
+            />
           )}
         </section>
 
@@ -201,6 +247,11 @@ function BedList({
   useEffect(() => {
     if (!userScrolling && first >= 0) virt.scrollToIndex(first, { align: "start" });
   }, [first]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const at = intervals.findIndex((r) => r.idx === selected);
+    if (at >= 0 && !userScrolling) virt.scrollToIndex(at, { align: "auto" });
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <section aria-label="Beds" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line">

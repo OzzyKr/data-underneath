@@ -4,7 +4,8 @@ Two tile sets per scan, both sliced into ``tile_h``-px WebP tiles so a 313,800 p
 
 * ``c*.webp`` - the lithology column alone, at full resolution: the main track of the Image view;
 * ``t*.webp`` - the wider context (depth column to lithology column, same margins as ``render.render_annotated``),
-  shrunk to at most ``max_width`` px wide: the optional "full scan" track.
+  shrunk to at most ``max_width`` px wide: the optional "full scan" track;
+* ``p*.webp`` - the whole page, uncropped, shrunk to at most 1100 px wide: the "whole page" view.
 
 The legend and each legend swatch are saved alongside for the legend panel.
 """
@@ -60,6 +61,24 @@ def _column_tiles(
     return {"box": list(box.as_tuple()), "scale": scale, "w": out_w, "h": out_h, "tile_h": tile_h, "n": n}
 
 
+def _page_tiles(
+    img: Image.Image, out_dir: Path, mode: str, *, tile_h: int, max_width: int = 1100, quality: int = 72
+) -> dict[str, Any]:
+    """The whole scan, uncropped, at overview resolution."""
+    W, H = img.size
+    scale = min(1.0, max_width / W)
+    out_w, out_h = max(1, round(W * scale)), max(1, round(H * scale))
+    n = (out_h + tile_h - 1) // tile_h
+    for k in range(n):
+        ty0, ty1 = k * tile_h, min(out_h, (k + 1) * tile_h)
+        sy0 = int(ty0 / scale)
+        sy1 = min(H, int(round(ty1 / scale)))
+        part = img.crop((0, sy0, W, max(sy1, sy0 + 1))).convert(mode)
+        part = part.resize((out_w, ty1 - ty0), Image.Resampling.LANCZOS if scale < 1 else Image.Resampling.NEAREST)
+        part.save(out_dir / f"p{k:04d}.webp", "WEBP", quality=quality, method=4)
+    return {"scale": scale, "w": out_w, "h": out_h, "tile_h": tile_h, "n": n, "image": [W, H]}
+
+
 def build_tiles(
     image_path: Path,
     boxes: DocumentBoxes,
@@ -89,6 +108,7 @@ def build_tiles(
         part.save(out_dir / f"t{k:04d}.webp", "WEBP", quality=quality, method=4)
 
     column = _column_tiles(img, boxes, out_dir, mode, tile_h=tile_h, quality=quality)
+    page = _page_tiles(img, out_dir, mode, tile_h=tile_h)
 
     legend_meta = None
     lg = boxes.legend.clip(W, H)
@@ -118,6 +138,7 @@ def build_tiles(
         "n": n,
         "legend": legend_meta,
         "col": column,
+        "page": page,
     }
     (out_dir / "meta.json").write_text(json.dumps(meta))
     return meta

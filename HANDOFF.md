@@ -51,7 +51,8 @@ When done: `lith labels-import` then `lith eval --pred out --labels labels --spl
 4. Stage 2 dashboard is built (see "Dashboard" below): add an AI key to `.env`, rehearse, then `make dash-demo`.
 
 ## Dashboard (Stage 2)
-- `make dash-data` then `make dash` -> http://127.0.0.1:8000. Pages: CSV, Image (scan tiles + overlay), Insights
+- `make dash-data` then `make dash` -> http://127.0.0.1:8000. Pages: CSV, Image (three views: Column = lithology column + depth ruler + labelled beds; Full scan; Whole page = the
+  uncropped scan with boxes, beds and a click-to-zoom lens), Insights
   (fixed-SQL charts, AI notes, Ask the data with visible SQL), Run a scan (live pipeline run, ~9 s for log06).
 - Back end `src/lithology/dash/` (store/tiles/insights/ai/jobs/app), front end `dashboard/` (Vite + React + Tailwind).
 - Holdout logs are hidden unless `lith dash-build --all` (`make dash-demo`) - only for the final demo.

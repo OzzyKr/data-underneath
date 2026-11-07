@@ -105,6 +105,9 @@ def test_api_serves_the_log_and_its_exact_csv(client, dash_repo):
     col = detail["tiles"]["col"]
     assert col["n"] >= 1 and col["box"][1] == detail["boxes"]["interpreted_lithology_column"][1]
     assert client.get(f"/tiles/{lid}/c0000.webp").status_code == 200
+    page = detail["tiles"]["page"]
+    assert page["image"] == [detail["image_w"], detail["image_h"]] and page["n"] >= 1
+    assert client.get(f"/tiles/{lid}/p0000.webp").status_code == 200
     assert {r["rock"] for r in detail["rocks"]} >= {"Shale", "Sandstone"}
     assert any(e["used"] and e["swatch_url"] for e in detail["legend"])
     rows = client.get(f"/api/logs/{lid}/intervals").json()

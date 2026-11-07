@@ -53,6 +53,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, con
   const col = t.col!;
   const el = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 900, h: 700 });
+  const [measured, setMeasured] = useState(false); // first scroll waits for the real viewer size
   const [top, setTop] = useState(0);
   const [left, setLeft] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
@@ -66,6 +67,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, con
     const ro = new ResizeObserver(() => setSize({ w: node.clientWidth, h: node.clientHeight }));
     ro.observe(node);
     setSize({ w: node.clientWidth, h: node.clientHeight });
+    setMeasured(true);
     return () => ro.disconnect();
   }, []);
 
@@ -125,7 +127,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, con
 
   // first view of a log: the selected bed, else the most varied part of the log
   useLayoutEffect(() => {
-    if (placedFor.current === log.log_id || size.h < 100) return;
+    if (!measured || placedFor.current === log.log_id || size.h < 100) return;
     placedFor.current = log.log_id;
     const sel = intervals.find((r) => r.idx === selected);
     if (sel) {
@@ -136,7 +138,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, con
     const d = Number.isFinite(windowFt) ? bestWindow(intervals, windowFt as number) : null;
     const y = d != null ? map.yAt(d) : null;
     scrollTo(y != null ? sy(y) - 24 : 0);
-  }, [log.log_id, size.h, intervals]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [log.log_id, size.h, intervals, measured]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // keep the same depth in the middle when the zoom changes
   useLayoutEffect(() => {
@@ -408,7 +410,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, con
   );
 }
 
-function Minimap({
+export function Minimap({
   intervals,
   y0,
   y1,
