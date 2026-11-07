@@ -98,6 +98,7 @@ def salt_table(logs: pd.DataFrame, intervals: pd.DataFrame) -> pd.DataFrame:
             }
         )
     out = pd.DataFrame(rows, columns=cols)
+    out["main_log"] = False
     if len(out):
         # one representative log per well: the one showing the thickest salt body (other logs = other scales/versions)
         best = out.sort_values(["well", "body_thickness_ft"], ascending=[True, False]).groupby("well").head(1).index

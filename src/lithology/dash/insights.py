@@ -270,7 +270,10 @@ def snapshot(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
     }
     frames = {name: con.execute(q).df() for name, q in queries.items()}
     frames["wells"] = wells_table(frames["logs"])
-    frames["salt"] = salt_table(frames["logs"], frames["intervals"])
+    by_log = salt_table(frames["logs"], frames["intervals"])
+    # one row per well, so salt answers and charts can never count a well twice
+    frames["salt"] = by_log.loc[by_log["main_log"].astype(bool)].drop(columns="main_log")
+    frames["salt_by_log"] = by_log
     for name, df in frames.items():
         mem.register("_src", df)
         mem.execute(f"CREATE TABLE {name} AS SELECT * FROM _src")
@@ -326,16 +329,18 @@ legend: one row per legend entry read from a log.
 wells: one row per well. Use it to find a well by any of its names (a well's logs can have other titles, e.g. well
   'G16786' also has logs titled 'MDN-1 ...'; search other_names with ILIKE) and to count wells.
   well (= logs.well_group), other_names, n_logs, log_titles, depth_refs, top_ft, bottom_ft, kind.
-salt: one row per log that crosses a salt body of 100 ft or more, already computed from the beds. ALWAYS use this
-  table for questions about salt (where it starts or ends, how thick, what lies below) instead of summing salt beds.
-  well, log_title, depth_ref ('MD' measured along the hole or 'TVD' true vertical depth - several logs of one well
-  can differ only by this), salt_top_ft, top_seen (FALSE = the log starts inside the salt, so salt_top_ft is only
-  where the log begins and the real top is higher: say "at least" for the thickness and never call it the top of
-  salt), salt_base_ft (base of the main salt body = "where the salt ends"), body_thickness_ft (base - top, inclusions
-  included), salt_in_body_ft (salt only), mixed_zone_base_ft and mixed_zone_salt_ft (thin salt beds within 500 ft
-  below the base: a mixed zone, not the main salt; NULL if none), sand_below_base_ft, thickest_sand_below_ft,
-  log_top_ft, log_bottom_ft, n_salt_bodies, main_log (TRUE for one log per well).
-  For one answer per well, filter main_log = TRUE.
+salt: one row per WELL that crosses a salt body of 100 ft or more, already computed from the beds. ALWAYS use this
+  table for questions about salt (where it starts or ends, how thick, what lies below) instead of summing salt beds,
+  and build salt charts from it (it never repeats a well).
+  well, log_title (the log the row was read from), depth_ref ('MD' measured along the hole or 'TVD' true vertical
+  depth), salt_top_ft, top_seen (FALSE = the log starts inside the salt, so salt_top_ft is only where the log begins
+  and the real top is higher: say "at least" for the thickness and never call it the top of salt), salt_base_ft (base
+  of the main salt body = "where the salt ends"), body_thickness_ft (base - top, inclusions included), salt_in_body_ft
+  (salt only), mixed_zone_base_ft and mixed_zone_salt_ft (thin salt beds within 500 ft below the base: a mixed zone,
+  not the main salt; NULL if none), sand_below_base_ft, thickest_sand_below_ft, log_top_ft, log_bottom_ft,
+  n_salt_bodies.
+salt_by_log: the same columns plus main_log, one row per LOG (a well's logs can be other scales or MD/TVD versions).
+  Use it only to compare the logs of one well.
 
 How to work:
 - Get every number from run_sql. Never invent or estimate numbers.
