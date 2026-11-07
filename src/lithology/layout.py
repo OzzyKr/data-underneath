@@ -89,6 +89,14 @@ def _mm(dpi: float, mm: float) -> float:
 # Body
 
 
+def _thin_runs(xs: np.ndarray, max_w: int) -> np.ndarray:
+    """Keep the columns of contiguous runs no wider than max_w px."""
+    if not len(xs):
+        return xs
+    cuts = np.where(np.diff(xs) > 1)[0] + 1
+    return np.concatenate([r for r in np.split(xs, cuts) if len(r) <= max_w] or [np.zeros(0, int)])
+
+
 def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, int, np.ndarray]:
     """(top, bottom, x of the long vertical rules). Top is snapped to the header's bottom rule."""
     W, H = img.size
@@ -111,6 +119,7 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     xs = np.zeros(0, int)
     for thr in (0.9, 0.75, 0.6):
         xs = np.where((frac >= thr) & inner)[0]
+        xs = _thin_runs(xs, max(3, round(_mm(dpi, 1.0))))  # rules are thin: wide runs are dark fill, not rules
         if len(xs) >= 2:
             break
     if len(xs) < 2:
@@ -135,6 +144,7 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     # header bottom rule: lowest near-full-width dark row in the first inches of the structure. (A mirrored snap at
     # the bottom, onto a repeated footer header, was tried and removed: lone depth grid lines fooled it.)
     xa, xb = int(xs.min()), int(xs.max()) + 1
+    top = max(0, top - int(step))  # the run starts at the first sample past the rule; look from the sample before
     win_h = int(min(bot - top, cfg.header_search_in * dpi))
     if win_h > 10:
         g = _ink(crop_rgb(img, Box(xa, top, xb, top + win_h))) < 150
@@ -144,44 +154,54 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     return top, bot, xs
 
 
-def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 8) -> tuple[float, float]:
-    """Horizontal drift of the vertical rules down the page (scan skew), as x_shift(y) = a*y + b relative to the
-    page middle: each band's dark-column profile is cross-correlated with the middle band's."""
+def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 20) -> np.ndarray:
+    """Per-row horizontal drift of the vertical rules (scan skew, curved drift or stitched scans), in px.
+    Each band's dark-column profile is cross-correlated with a reference band from the lower page; only bands that
+    correlate well (normalised peak >= 0.6, so header bands are ignored) are used, and the shift is interpolated
+    between them."""
     n = len(ys)
+    zero = np.zeros(n)
     if n < 4 * n_bands:
-        return 0.0, 0.0
-    # only the lower 60% of the page (always log body; the header's structure differs and spoils the fit)
-    edges = np.linspace(int(0.4 * n), n, n_bands + 1).astype(int)
+        return zero
+    edges = np.linspace(0, n, n_bands + 1).astype(int)
     prof = [dark[a:b].mean(axis=0).astype(np.float32) for a, b in zip(edges[:-1], edges[1:], strict=False)]
-    ref = prof[n_bands // 2] - prof[n_bands // 2].mean()  # middle of the analysed part
-    if ref.std() < 1e-3:
-        return 0.0, 0.0
+    ref_i = int(0.8 * n_bands)
+    ref = prof[ref_i] - prof[ref_i].mean()
+    if np.linalg.norm(ref) < 1e-3:
+        return zero
     maxs = max(4, int(0.03 * W))
     yc, sh = [], []
     for (a, b), p in zip(zip(edges[:-1], edges[1:], strict=False), prof, strict=False):
         q = p - p.mean()
-        if q.std() < 1e-3:
+        nq = float(np.linalg.norm(q))
+        if nq < 1e-3:
             continue
-        cc = [float(np.dot(np.roll(q, -k), ref)) for k in range(-maxs, maxs + 1)]
-        yc.append(float(ys[(a + b) // 2]))
-        sh.append(float(np.argmax(cc) - maxs))
-    if len(sh) < 3:
-        return 0.0, 0.0
-    a, b = np.polyfit(yc, sh, 1)
-    resid = np.abs(np.polyval([a, b], yc) - np.array(sh))
-    if np.median(resid) > 3:  # inconsistent shifts: not a clean skew, leave the rows alone
-        return 0.0, 0.0
-    return float(a), float(b)
+        cc = np.array([float(np.dot(np.roll(q, -k), ref)) for k in range(-maxs, maxs + 1)])
+        k = int(np.argmax(cc))
+        if cc[k] / (nq * float(np.linalg.norm(ref))) >= 0.6:
+            yc.append(float(ys[(a + b) // 2]))
+            sh.append(float(k - maxs))
+    if len(sh) < 3 or max(sh) - min(sh) < 3:  # no measurable drift
+        return zero
+    return np.interp(ys, yc, sh)
 
 
-def deskew_rows(dark: np.ndarray, ys: np.ndarray, skew: tuple[float, float]) -> np.ndarray:
-    """Shift each sampled row back by the estimated drift (no-op when the drift is under 3 px over the page)."""
-    a, b = skew
-    if abs(a) * (ys[-1] - ys[0]) < 3:
+def _straight(rows_rgb: np.ndarray) -> np.ndarray:
+    """Sampled RGB rows (top to bottom) with the scan's horizontal drift removed, so the track rules line up."""
+    n, W = rows_rgb.shape[:2]
+    shift = estimate_skew(_ink(rows_rgb) < 150, np.arange(n), W)
+    if not np.any(np.abs(shift) >= 1):
+        return rows_rgb
+    return np.stack([np.roll(r, -int(round(v)), axis=0) for r, v in zip(rows_rgb, shift, strict=False)])
+
+
+def deskew_rows(dark: np.ndarray, ys: np.ndarray, shift: np.ndarray) -> np.ndarray:
+    """Shift each sampled row back by its estimated drift."""
+    if not np.any(np.abs(shift) >= 1):
         return dark
     out = np.empty_like(dark)
-    for i, y in enumerate(ys):
-        out[i] = np.roll(dark[i], -int(round(a * y + b)))
+    for i in range(len(ys)):
+        out[i] = np.roll(dark[i], -int(round(shift[i])))
     return out
 
 
@@ -448,9 +468,91 @@ def _phrases(words: list, gap_h: float = 1.5) -> list[list]:
     return lines
 
 
-def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tuple[float, float]]:
-    """x-centre and x-width of 'Lith...' header words, judged by their whole phrase ("% Lithology" and
-    "Lithology Description" do not count). Vertical track headers are read from the strip above the body."""
+_POS_HEADER = re.compile(r"lith|interp|\bint\.?\s*lit")
+_STRONG_HEADER = re.compile(r"interp|\bint\.?\s*lit")  # "Interp Lith", "Int. Lith": the interpreted column by name
+
+
+def _rule_top(dk: np.ndarray, x: int, gap: int) -> int:
+    """Topmost row of the vertical rule at column x, followed upward from the bottom row across gaps < gap rows."""
+    col = dk[:, max(0, x - 1) : x + 2].any(axis=1)
+    y, last = len(col) - 1, len(col) - 1
+    while y >= 0 and last - y <= gap:
+        if col[y]:
+            last = y
+        y -= 1
+    return last
+
+
+def track_header_texts(img: Image.Image, top: int, dpi: float, sh: int) -> list[tuple[float, float, str]]:
+    """Text of each narrow track's header cell, read upright and rotated both ways: vertical headers ("LITHOLOGY",
+    "Interp Lith", "CUTTING %") are only legible one cell at a time. The cells are cut between the vertical rules
+    of the header's bottom row and pasted onto one canvas per orientation, so it is one Tesseract call each."""
+    W = img.size[0]
+    strip = _gray(crop_rgb(img, Box(0, top - sh, W, top)))
+    dk = strip < 128
+    foot = dk[-max(4, int(0.4 * dpi)) :]
+    col = foot.mean(axis=0) >= 0.7
+    xs, x = [], 0
+    while x < W:  # centres of rule runs
+        if col[x]:
+            e = x
+            while e + 1 < W and col[e + 1]:
+                e += 1
+            xs.append((x + e) / 2)
+            x = e + 1
+        else:
+            x += 1
+    lo, hi = _mm(dpi, 3.0), _mm(dpi, 25.0)
+    gap = max(2, int(0.05 * dpi))
+    cells = []
+    for a, b in zip(xs, xs[1:], strict=False):
+        a0, b0 = int(a) + 3, int(b) - 2
+        if not lo <= b - a <= hi:
+            continue
+        y0 = max(_rule_top(dk, int(round(a)), gap), _rule_top(dk, int(round(b)), gap))  # where both side rules start
+        if sh - y0 > 0.2 * dpi:
+            cells.append((a0, b0, y0))
+    if not cells:
+        return []
+    texts = {c: [] for c in cells}
+    up = 2.0 if dpi < 250 else 1.0
+    gap = 24
+    for k in (0, 1, 3):
+        parts = [np.ascontiguousarray(np.rot90(strip[y0:, a0:b0], k)) for a0, b0, y0 in cells]
+        if k == 0:  # side by side
+            H_ = max(p.shape[0] for p in parts)
+            canvas = np.full((H_, sum(p.shape[1] + gap for p in parts)), 255, np.uint8)
+            spans, o = [], 0
+            for p in parts:
+                canvas[H_ - p.shape[0] :, o : o + p.shape[1]] = p
+                spans.append((o, o + p.shape[1]))
+                o += p.shape[1] + gap
+        else:  # stacked rows
+            W_ = max(p.shape[1] for p in parts)
+            canvas = np.full((sum(p.shape[0] + gap for p in parts), W_), 255, np.uint8)
+            spans, o = [], 0
+            for p in parts:
+                canvas[o : o + p.shape[0], : p.shape[1]] = p
+                spans.append((o, o + p.shape[0]))
+                o += p.shape[0] + gap
+        d = pytesseract.image_to_data(
+            Image.fromarray(canvas).resize((round(canvas.shape[1] * up), round(canvas.shape[0] * up))),
+            config="--psm 11",
+            output_type=pytesseract.Output.DICT,
+        )
+        for t, c, x, y, w, h in zip(d["text"], d["conf"], d["left"], d["top"], d["width"], d["height"], strict=False):
+            if not t.strip() or float(c) < 30:
+                continue
+            m = ((x + w / 2) if k == 0 else (y + h / 2)) / up
+            for cell, (s0, s1) in zip(cells, spans, strict=False):
+                if s0 <= m < s1:
+                    texts[cell].append(t.strip().lower())
+    return [((a0 + b0) / 2, float(b0 - a0), " ".join(ws)) for (a0, b0, _), ws in texts.items() if ws]
+
+
+def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tuple[float, float, bool]]:
+    """x-centre, x-width and strength ("Interp"/"Int." = strong) of 'Lith...' header words or track cells, judged by
+    their whole phrase ("% Lithology" and "Lithology Description" do not count)."""
     out = []
     neg = []
 
@@ -463,9 +565,10 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
                 continue
             if "lith" not in text or any(z in text for z in _BAD_HEADER):
                 continue
+            strong = bool(_STRONG_HEADER.search(text))
             for w in ph:
                 if "lith" in w[4].lower():
-                    out.append(to_x(w))
+                    out.append((*to_x(w), strong))
 
     take(_phrases(words), lambda w: ((w[0] + w[2]) / 2, w[2] - w[0]))
     W = img.size[0]
@@ -473,14 +576,11 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
     if sh > 20:
         s = min(1.0, 2000.0 / W)
         strip = _gray(crop_rgb(img, Box(0, top - sh, W, top), scale=s))
-        hs, ws_ = strip.shape
-        for k in (1, 3):  # np.rot90: 1 = counter-clockwise, 3 = clockwise
-            rot = np.ascontiguousarray(np.rot90(strip, k))
-            rw = [(w.x0, w.y0, w.x1, w.y1, w.text) for w in _ocr_words(rot, 1.5 if dpi * s < 190 else 1.0, 30)]
-            if k == 1:  # rotated (u=col, v=row) -> original x = ws-1-v ; width in x = word height
-                take(_phrases(rw), lambda w: ((ws_ - 1 - (w[1] + w[3]) / 2) / s, (w[3] - w[1]) / s))
-            else:  # k == 3: original x = v
-                take(_phrases(rw), lambda w: (((w[1] + w[3]) / 2) / s, (w[3] - w[1]) / s))
+        for x, wd, text in track_header_texts(img, top, dpi, sh):
+            if any(z in text for z in _NEG_HEADER):
+                neg.append((x, wd))
+            elif _POS_HEADER.search(text) and not any(z in text for z in _BAD_HEADER):
+                out.append((x, -wd, bool(_STRONG_HEADER.search(text))))  # negative width marks a whole cell
         # horizontal headers with raw tokens: the legend word reader drops symbols, so "% Lithology" would otherwise
         # read as "Lithology" (a positive anchor over the percent-lithology track)
         d = pytesseract.image_to_data(Image.fromarray(strip), config="--psm 11", output_type=pytesseract.Output.DICT)
@@ -493,7 +593,7 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
         ]
         take(_phrases(raw), lambda w: ((w[0] + w[2]) / 2, w[2] - w[0]))
     # a positive anchor sitting on a negative one is the same header read without its "%" / "Cuttings"
-    out = [(x, wd) for x, wd in out if not any(abs(x - nx) <= max(wd, nwd, 0.1 * dpi) for nx, nwd in neg)]
+    out = [(x, wd, st) for x, wd, st in out if not any(abs(x - nx) <= max(abs(wd), nwd, 0.1 * dpi) for nx, nwd in neg)]
     lith_anchors.negative = neg  # type: ignore[attr-defined]  # read by detect_boxes right after the call
     return out
 
@@ -656,6 +756,14 @@ def legend_palette(img: Image.Image, box: tuple, n_max: int = 12) -> np.ndarray:
 # Lithology column
 
 
+def _fits(a: int, b: int, x: float, wd: float) -> bool:
+    """Does the header (word of width wd, or whole track cell of width -wd) label the candidate [a, b]?"""
+    if wd < 0:  # a track cell labels candidates that cover most of it, not a half-track inside it
+        c0, c1 = x + wd / 2, x - wd / 2
+        return min(b, c1) - max(a, c0) >= 0.7 * (c1 - c0) and b - a <= 1.3 * (c1 - c0)
+    return wd <= 1.5 * (b - a)
+
+
 def lith_candidates(
     rows_rgb: np.ndarray,
     edges: list[int],
@@ -663,7 +771,7 @@ def lith_candidates(
     dpi: float,
     cfg: LayoutConfig,
     palette: np.ndarray,
-    anchors: list[tuple[float, float]],
+    anchors: list[tuple[float, float, bool]],
     rules: list[tuple[int, int]] | None = None,
     neg_anchors: list[tuple[float, float]] | None = None,
 ) -> list[dict]:
@@ -677,6 +785,7 @@ def lith_candidates(
     key = key[..., 0] * 49 + key[..., 1] * 7 + key[..., 2]
     pal = palette if len(palette) else None
     rules = rules or []
+    fringe = max(1, round(_mm(dpi, 0.15)))
     out = []
     for i, a in enumerate(edges):
         for b in edges[i + 1 :]:
@@ -688,10 +797,19 @@ def lith_candidates(
             # a whole rule strictly inside: two tracks, not one (rules the candidate starts/ends on are fine)
             if any(rs > a + 1 and re_ < b - 1 for rs, re_ in rules):
                 continue
-            nw = nonwhite[:, a:b]
-            fp = fillpx[:, a:b]
+            # cues on the interior: a black rule the candidate starts or ends on is not a second colour
+            a_, b_ = a, b  # (and the anti-aliased fringe just past it)
+            for rs, re_ in rules:
+                if rs - 1 <= a <= re_ + 1:
+                    a_ = max(a_, re_ + 1 + fringe)
+                if rs - 1 <= b <= re_ + 1:
+                    b_ = min(b_, rs - fringe)
+            if b_ - a_ < 3:
+                a_, b_ = a, b
+            nw = nonwhite[:, a_:b_]
+            fp = fillpx[:, a_:b_]
             fill_r = nw.mean(axis=1)
-            k = key[:, a:b]
+            k = key[:, a_:b_]
             R = k.shape[0]
             hist = np.zeros((R, 343), np.float32)
             ri = np.repeat(np.arange(R), k.shape[1]).reshape(k.shape)
@@ -706,26 +824,30 @@ def lith_candidates(
             runs_row = 1.0 + ch.sum(axis=1)
             runs = float(np.median(runs_row[ok])) if ok.any() else 9.0
             # texture cues (black-and-white pages): hatch-like ink density, same pattern left and right
-            inkc = ink[:, a:b]
+            inkc = ink[:, a_:b_]
             ink_r = inkc.mean(axis=1)
             tex_fill = float(np.mean((ink_r > 0.05) & (ink_r < 0.6)))
-            dl = inkc[:, : max(1, w // 3)].mean(axis=1)
-            dr = inkc[:, -max(1, w // 3) :].mean(axis=1)
+            wi = b_ - a_
+            dl = inkc[:, : max(1, wi // 3)].mean(axis=1)
+            dr = inkc[:, -max(1, wi // 3) :].mean(axis=1)
             busy = (dl + dr) > 0.04
             lr = float(np.mean(np.abs(dl - dr)[busy] / ((dl + dr)[busy] / 2 + 1e-6))) if busy.any() else 1.0
-            thirds = [nw[:, j * w // 3 : (j + 1) * w // 3].mean(axis=1) > 0.05 for j in range(3)]
+            thirds = [nw[:, j * wi // 3 : (j + 1) * wi // 3].mean(axis=1) > 0.05 for j in range(3)]
             spread = float(np.mean(thirds[0] & thirds[1] & thirds[2]))
             cov = 0.0
             if pal is not None:
-                px = rows_rgb[:, a:b][fp & ((mx[:, a:b] - mn[:, a:b]) > 25)]
+                px = rows_rgb[:, a_:b_][fp & ((mx[:, a_:b_] - mn[:, a_:b_]) > 25)]
                 if len(px) > 50:
                     lab = cv2.cvtColor(px[:: max(1, len(px) // 3000)].reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
                     lab = lab.reshape(-1, 3).astype(np.float32)
                     cov = float((np.linalg.norm(lab[:, None] - pal[None], axis=2).min(axis=1) < 14).mean())
             outside = np.concatenate([nonwhite[:, max(0, a - 6) : max(0, a - 1)], nonwhite[:, b + 1 : b + 6]], axis=1)
             contrast = float(fill_r.mean() - (outside.mean() if outside.size else 0.0))
-            header = float(any(a <= x <= b and wd <= 1.5 * w for x, wd in anchors))
-            negh = float(any(a <= x <= b and wd <= 1.5 * w for x, wd in neg_anchors or []))
+            header = float(any(a <= x <= b and _fits(a, b, x, wd) for x, wd, _ in anchors))
+            strong = float(any(a <= x <= b and _fits(a, b, x, wd) and st for x, wd, st in anchors))
+            # a negative label covers its whole word / track cell: a fragment of the cuttings track inherits it
+            cx = (a + b) / 2
+            negh = float(any(abs(cx - x) <= wd / 2 + 2 for x, wd in neg_anchors or []))
             out.append(
                 {
                     "x0": a,
@@ -740,6 +862,7 @@ def lith_candidates(
                     "tex_fill": tex_fill,
                     "lr": lr,
                     "header": header,
+                    "strong_header": strong,
                     "neg_header": negh,
                 }
             )
@@ -757,6 +880,23 @@ _FLOOR = {
     "tex_fill": 0.1,
     "lr": 0.1,
 }
+
+
+_ANCHORED_FIRST = True
+
+
+def _dedupe_tracks(cands: list[dict], thr: float = 0.85) -> list[dict]:
+    """Keep one of each group of near-identical candidates (x-IoU > thr), so a dozen variants of one track do not
+    become the pool's median and hide it from the robust scores."""
+    order = sorted(cands, key=lambda c: (-c["contrast"], -c["fill"]))
+    kept: list[dict] = []
+    for c in order:
+        if all(
+            (min(c["x1"], k["x1"]) - max(c["x0"], k["x0"])) / (max(c["x1"], k["x1"]) - min(c["x0"], k["x0"])) <= thr
+            for k in kept
+        ):
+            kept.append(c)
+    return kept
 
 
 def _page_is_grey(rows_rgb: np.ndarray) -> bool:
@@ -784,7 +924,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     W, H = img.size
     dpi = image_dpi(img) or W / 8.5
     top, bot, _ = body_range(img, dpi, cfg)
-    rows = _rows(img, np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top), 500).astype(int))
+    rows = _straight(_rows(img, np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top), 500).astype(int)))
     edges, dark, rules = vertical_edges(rows, dpi)
     diag: dict = {"dpi": dpi, "body": [top, bot], "n_edges": len(edges)}
 
@@ -848,18 +988,19 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     anchors = lith_anchors(img, top, dpi, words)
     neg_anchors = getattr(lith_anchors, "negative", [])
     diag["neg_anchors"] = [[round(x), round(wd)] for x, wd in neg_anchors]
-    diag["anchors"] = [[round(x), round(wd)] for x, wd in anchors]
+    diag["anchors"] = [[round(x), round(wd), int(st)] for x, wd, st in anchors]  # wd < 0: a whole track cell
     palette = legend_palette(img, legend) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
     bw_page = img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))
     lrows = rows
     if bw_page:  # hatching skips rows: measure texture on thin bands (darkest pixel over ~0.03 in of rows)
         band = max(2, int(0.03 * dpi))
         ys = np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top) - band, 300).astype(int)
-        lrows = np.stack([_rows(img, np.arange(y, y + band)).min(axis=0) for y in ys])
+        lrows = _straight(np.stack([_rows(img, np.arange(y, y + band)).min(axis=0) for y in ys]))
     lcs = lith_candidates(lrows, edges, dark, dpi, cfg, palette, anchors, rules, neg_anchors)
-    if dcs:  # never let a depth candidate's labels sit inside a lithology candidate
-        lx = dcs[0]["labels"]
-        lcs = [c for c in lcs if min(c["x1"], lx[1]) - max(c["x0"], lx[0]) <= 2]
+    if dcs:  # never let the depth labels sit inside a lithology candidate (touching its edge is fine)
+        lxc = sum(dcs[0]["labels"]) / 2
+        lcs = [c for c in lcs if not (c["x0"] < lxc < c["x1"])]
+    lcs = _dedupe_tracks(lcs)
     bw = bw_page
     diag["bw"] = bool(bw)
     if bw:  # colour cues are constant on black-and-white pages: judge the hatch texture instead
@@ -880,6 +1021,8 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         gated = [c for c in lcs if c["fill"] >= 0.05 or c["tex_fill"] >= 0.15]
     if gated:  # the track under a "Lithology" header always competes, even if a cue gate rejected it
         gated += [c for c in lcs if c["header"] and c not in gated]
+    if any(not c["neg_header"] for c in gated):  # a track under a cuttings/% header is never the interpreted one
+        gated = [c for c in gated if not c["neg_header"]]
     pool = gated or lcs
     if pool:
         _rank_sum(pool, cues)
@@ -887,6 +1030,15 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
             c["score"] += cfg.lith_header_bonus * c["header"] - cfg.lith_negative_header_penalty * c["neg_header"]
         pool.sort(key=lambda c: -c["score"])
         best = pool[0]
+        # a track under a "Lithology"/"Interp" header (and under no cuttings/% header) is chosen first: the header is
+        # the most reliable cue we have; the cue score only ranks tracks within that group
+        # only a strong name ("Interp Lith", "Int. Lith") overrides the cues; a bare "Lith" only adds its bonus
+        anchored = [c for c in pool if c["strong_header"] and not c["neg_header"] and (bw or c["fill"] >= 0.3)]
+        anchored = anchored if _ANCHORED_FIRST else []
+        if anchored:
+            best = anchored[0]
+            pool = [best] + [c for c in pool if c is not best]
+        diag["lith_anchored"] = bool(anchored)
         lith = (best["x0"], top, best["x1"], bot)
         # a "Lithology" header over the pick is the strongest cue (dev AUROC 0.81); then a clear margin and, on colour
         # pages, one colour class per row
@@ -902,10 +1054,12 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     # joint resolution: if the depth box overlaps the chosen lithology column, shrink it to its labels' side
     if dcs and pool and min(lith[2], depth[2]) - max(lith[0], depth[0]) > 2:
         lx0, lx1 = dcs[0]["labels"]
-        if lith[0] >= lx1 - 2:  # lithology to the right of the labels
-            depth = (depth[0], depth[1], min(depth[2], lith[0]), depth[3])
+        if (lith[0] + lith[2]) / 2 >= (lx0 + lx1) / 2:  # lithology to the right of the labels
+            new = (depth[0], depth[1], max(lx1, min(depth[2], lith[0])), depth[3])
         else:
-            depth = (max(depth[0], lith[2]), depth[1], depth[2], depth[3])
+            new = (min(lx0, max(depth[0], lith[2])), depth[1], depth[2], depth[3])
+        if new[2] - new[0] >= _mm(dpi, cfg.min_track_mm):  # never produce an empty or inverted box
+            depth = new
         diag["depth_shrunk"] = list(depth)
 
     def box(t: tuple) -> Box:
