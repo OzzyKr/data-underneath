@@ -9,3 +9,4 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T20:39:16,b7485f7-dirty,3d00a0c0ba71,1ae115030da8,dev,d_strokes: c_all + stroke-shape opinion in best guess,1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T20:45:34,b7485f7-dirty,3d00a0c0ba71,1ae115030da8,dev,e_rules out/ run,1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T20:56:15,b7485f7-dirty,3d00a0c0ba71,1ae115030da8,dev,similar-types category,1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T21:06:34,da1cffe-dirty,3d00a0c0ba71,1ae115030da8,dev,stacked swatches recovered (GC297),1.0,300.0,0.8154,0.9416,0.0,0.8824,0.9375,0.9091,0.1159,0.8326

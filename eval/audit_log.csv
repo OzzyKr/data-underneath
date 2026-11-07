@@ -7,3 +7,4 @@ timestamp,commit,config_hash,pred,note,n,correct,accuracy,flagged,confident_wron
 2026-11-07T20:39:15,b7485f7-dirty,3d00a0c0ba71,d_strokes,d_strokes: c_all + stroke-shape opinion in best guess,91,80,0.8791,28,1
 2026-11-07T20:45:33,b7485f7-dirty,3d00a0c0ba71,out,"e_rules (strokes+unanimity+split-only variants+colour filter), out/ run",91,80,0.8791,20,3
 2026-11-07T20:56:14,b7485f7-dirty,3d00a0c0ba71,out,similar-types category (status column); same naming as e_rules,91,80,0.8791,20,3
+2026-11-07T21:06:33,da1cffe-dirty,3d00a0c0ba71,out,stacked swatches recovered from fused blobs (GC297),91,80,0.8791,20,3

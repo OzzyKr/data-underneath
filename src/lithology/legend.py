@@ -464,16 +464,27 @@ def _swatch_candidates(
     text_mask = np.zeros((H, W), bool)
     for w in real:
         text_mask[w.y0 : w.y1, w.x0 : w.x1] = True
+
+    def swatch_like(x: int, y: int, w: int, h: int) -> bool:
+        if w < min_px or h < min_px // 2 or w > 0.45 * W or h > 0.45 * H:
+            return False
+        if w / max(h, 1) > 15 or h / max(w, 1) > 6:
+            return False
+        return text_mask[y : y + h, x : x + w].mean() <= 0.5
+
+    # Swatches stacked with a 1-2 px gap fuse into one strip when closed; the pieces before closing are the swatches.
+    _, raw_lab, raw_st, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     boxes = []
     for i in range(1, n):
         x, y, w, h, _ = st[i]
-        if w < min_px or h < min_px // 2 or w > 0.45 * W or h > 0.45 * H:
-            continue
-        if w / max(h, 1) > 15 or h / max(w, 1) > 6:
-            continue
-        if text_mask[y : y + h, x : x + w].mean() > 0.5:
-            continue
-        boxes.append(Box(int(x), int(y), int(x + w), int(y + h)))
+        if swatch_like(x, y, w, h):
+            boxes.append(Box(int(x), int(y), int(x + w), int(y + h)))
+        elif w > 0.45 * W or h > 0.45 * H or w / max(h, 1) > 15 or h / max(w, 1) > 6:
+            inner = np.unique(raw_lab[y : y + h, x : x + w][closed[y : y + h, x : x + w] > 0])
+            for j in inner[inner > 0]:
+                rx, ry, rw, rh, area = raw_st[j]
+                if swatch_like(rx, ry, rw, rh) and area >= 0.5 * rw * rh:  # a filled block, not a stray stroke
+                    boxes.append(Box(int(rx), int(ry), int(rx + rw), int(ry + rh)))
 
     def inside(a: Box, b: Box) -> bool:
         return a is not b and b.x0 <= a.x0 and b.y0 <= a.y0 and a.x1 <= b.x1 and a.y1 <= b.y1
