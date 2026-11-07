@@ -1,2 +1,17 @@
-Available
+Argillaceous
+Breccia
+Calcareous
+Carbonaceous
+Dolomite
+Glauconite
+Kaolinite
+Limestone
+Marly
+Not Available
+Pyrite
 Sample
+Sandstone
+Sandy
+Siliceous
+Siltstone
+rite

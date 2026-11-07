@@ -273,13 +273,28 @@ def cmd_labels_make(a: argparse.Namespace) -> int:
     docs = discover(Path(a.images)).documents
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    only = set(a.only.split(",")) if a.only else None
+    existing = {}
+    if (out / "kit.json").exists():
+        from lithology.labelkit import KitItem
+
+        existing = {d["key"]: KitItem(**d) for d in json.loads((out / "kit.json").read_text())}
+    if only and not only <= {s["key"] for s in sel}:
+        log.error("unknown keys in --only: %s", sorted(only - {s["key"] for s in sel}))
+        return 2
     items = []
     for s in sel:
+        if only and s["key"] not in only:
+            if s["key"] in existing:
+                items.append(existing[s["key"]])  # untouched: keep the person's files and window
+            continue
         doc = next((d for d in docs if d.doc_id.startswith(s["prefix"])), None)
         if doc is None:
             log.error("no document matches prefix %r", s["prefix"])
             return 2
-        item = make_item(doc, s["key"], s["split"], cfg, out)
+        old = existing.get(s["key"])
+        window = (old.window_top_ft, old.window_bottom_ft) if old else None  # keep a window already shown
+        item = make_item(doc, s["key"], s["split"], cfg, out, window=window)
         log.info(
             "%-12s %-8s %6.0f-%6.0f ft  %s",
             item.key,
@@ -335,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     lm.add_argument("--images", default="dataset/images")
     lm.add_argument("--out", default="labels/kit")
     lm.add_argument("--config")
+    lm.add_argument("--only", help="comma-separated kit keys to rebuild (others are left untouched)")
     lm.set_defaults(fn=cmd_labels_make)
 
     li = sub.add_parser("labels-import", help="turn corrected kit CSVs into label files")

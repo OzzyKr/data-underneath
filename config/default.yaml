@@ -14,11 +14,18 @@ scale:
 
 segment:
   core_width_fraction: 0.6   # analyse the central part of the column, away from border lines and text
+  # coarse pass: colour + pattern (works on black-and-white logs too)
   block_ft: 1.0              # descriptor block height
   min_block_px: 12           # but never shorter than this (pattern periods are ~10-40 px)
-  min_thickness_ft: 2.0      # thinnest interval we report
-  penalty: 3.0               # change-point penalty (PELT, on standardised block descriptors)
+  min_thickness_ft: 2.0      # thinnest bed the coarse pass reports
+  penalty: 3.0               # change-point penalty (on noise-scaled block descriptors)
   refine_window_ft: 1.5      # boundary refinement search radius around a block edge
+  # fine pass: background colour only (thin beds in colour logs; inert on black-and-white logs)
+  colour_block_ft: 0.25
+  colour_min_block_px: 3
+  colour_min_thickness_ft: 0.5  # thinnest bed reported at all (single pattern rows ~0.7 ft exist)
+  colour_sliver_ft: 1.0      # beds thinner than this are kept only between two layers of the same rock
+  colour_penalty: 3.0
   ink_luma: 110              # pixels darker than this (0-255) count as pattern ink / lines
   blank_ink_fraction: 0.004  # a block with less ink than this AND near-white fill is blank paper
   blank_fill_luma: 240
@@ -34,7 +41,7 @@ legend:
   ocr_min_conf: 30
 
 checks:
-  min_thickness_ft: 1.0
+  min_thickness_ft: 0.5      # beds thinner than this get lower confidence
   depth_monotonic: true
 
 render:

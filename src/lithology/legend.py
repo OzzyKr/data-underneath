@@ -144,12 +144,27 @@ def _ocr_words(gray: np.ndarray, upscale: float, min_conf: float) -> list[_Word]
     d = pytesseract.image_to_data(pil, config="--psm 11", output_type=pytesseract.Output.DICT)
     words = []
     for t, c, x, y, w, h in zip(d["text"], d["conf"], d["left"], d["top"], d["width"], d["height"], strict=False):
-        t = t.strip()
+        t = _strip_glued(t.strip())
         if not t or float(c) < min_conf or not re.search(r"[A-Za-z]{2,}", t):
             continue
         s = 1.0 / upscale
         words.append(_Word(t, int(x * s), int(y * s), int((x + w) * s), int((y + h) * s), float(c)))
     return words
+
+
+def _strip_glued(text: str) -> str:
+    """Remove swatch-border ink read as characters at a word's ends ("|Sandstone", "4Siltstone", "Marly_")."""
+    core = re.sub(r"^[^A-Za-z(]+(?=[A-Za-z]{3})", "", text)
+    return re.sub(r"(?<=[A-Za-z)])[^A-Za-z)]+$", "", core) if re.search(r"[A-Za-z]{3}", core) else core
+
+
+def _merge_words(primary: list[_Word], extra: list[_Word]) -> list[_Word]:
+    """Primary OCR pass plus words from a second pass that fall where the primary pass read nothing."""
+
+    def overlaps(a: _Word, b: _Word) -> bool:
+        return min(a.x1, b.x1) > max(a.x0, b.x0) and min(a.y1, b.y1) > max(a.y0, b.y0)
+
+    return primary + [w for w in extra if not any(overlaps(w, p) for p in primary)]
 
 
 def _phrases(words: list[_Word]) -> list[_Phrase]:
@@ -180,8 +195,12 @@ def _phrases(words: list[_Word]) -> list[_Phrase]:
 
 
 def _is_wordlike(w: _Word) -> bool:
+    """Confident, word-shaped text; a known rock name is trusted at lower confidence."""
     letters = re.sub(r"[^A-Za-z]", "", w.text)
-    return w.conf >= 60 and len(letters) >= 3 and len(letters) >= 0.6 * len(w.text)
+    if len(letters) < 3 or len(letters) < 0.6 * len(w.text):
+        return False
+    known = any(correct_word(part).lower() in ROCK_WORDS for part in re.findall(r"[A-Za-z]+", w.text))
+    return w.conf >= (30 if known else 60)
 
 
 def _swatch_candidates(gray: np.ndarray, words: list[_Word], min_px: int) -> list[Box]:
@@ -200,6 +219,10 @@ def _swatch_candidates(gray: np.ndarray, words: list[_Word], min_px: int) -> lis
     lines = cv2.dilate(hl | vl, np.ones((3, 3), np.uint8))
     ink[lines > 0] = 0
     real = [w for w in words if _is_wordlike(w)]
+    # Cut confident words out, so a label printed touching its swatch does not fuse with it. Only word-like OCR
+    # is cut: "text" read inside a pattern is low-confidence or not word-shaped, so swatches stay intact.
+    for w in real:
+        ink[w.y0 : w.y1, w.x0 : w.x1] = 0
     th = int(np.median([w.h for w in real])) if real else 12
     k = max(3, th // 3)
     closed = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, max(3, k // 2))))
@@ -306,6 +329,8 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
     gray = (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114])).astype(np.uint8)
     upscale = 2.0 if dpi <= 200 else 1.0
     words = _ocr_words(gray, upscale, cfg.ocr_min_conf)
+    if dpi <= 250:  # small text: a second zoom level reads labels the first one misses
+        words = _merge_words(words, _ocr_words(gray, 3.0 - upscale, cfg.ocr_min_conf))
     swatches = _swatch_candidates(gray, words, cfg.min_swatch_px)
 
     def in_swatch(w: _Word) -> bool:
@@ -325,6 +350,15 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
         if chain:
             text = " ".join(phrases[j].text for j in chain)
             conf = float(np.mean([phrases[j].conf for j in chain]))
+            if layout == "below":  # labels under swatches wrap onto two lines that page OCR can miss
+                rr, rr_conf = _reread_label(gray, s, swatches, layout, th, upscale, cfg.ocr_min_conf)
+                first = clean_label(text).split()[:1]
+                if (
+                    first
+                    and len(re.sub("[^A-Za-z]", "", rr)) > len(re.sub("[^A-Za-z]", "", text))
+                    and first[0].lower() in clean_label(rr).lower()
+                ):
+                    text, conf = rr, rr_conf
         else:  # page-level OCR missed this label: re-read just the strip where it should be
             text, conf = _reread_label(gray, s, swatches, layout, th, upscale, cfg.ocr_min_conf)
             # A fallback read must name a known rock, so specks and stray glyphs do not become entries.

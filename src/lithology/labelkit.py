@@ -66,13 +66,15 @@ def _y_of(depth: float, knots_y: list[float], knots_depth: list[float]) -> float
     return float(np.interp(depth, ds, ys))
 
 
-def make_item(doc: Document, key: str, split: str, cfg: Config, out_dir: Path) -> KitItem:
+def make_item(
+    doc: Document, key: str, split: str, cfg: Config, out_dir: Path, window: tuple[float, float] | None = None
+) -> KitItem:
     res = process(doc, cfg)
     if not res.ok or res.scale is None or res.boxes is None:
         raise RuntimeError(f"{doc.doc_id}: cannot build a kit item ({res.error or 'no depth scale'})")
     sc = res.scale
     window_ft = 200.0 if sc.px_per_ft >= 5 else 400.0
-    top_ft, bot_ft = choose_window(res.intervals, window_ft)
+    top_ft, bot_ft = window if window else choose_window(res.intervals, window_ft)
     knots_y, knots_d = list(sc.knots_y), list(sc.knots_depth)
     lc, dc = res.boxes.lithology_column, res.boxes.depth_column
     y0 = max(lc.y0, int(_y_of(top_ft, knots_y, knots_d)))
