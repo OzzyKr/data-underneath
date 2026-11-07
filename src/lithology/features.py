@@ -41,24 +41,36 @@ TEXTURE_IDX = np.array([6, 7, 8, 9, 10, 11])
 
 @dataclass
 class RowStats:
-    """Per-row sums for an (H, W, 3) crop; block sums are differences of cumulative sums."""
+    """Prefix sums over the rows of an (H, W, 3) crop.
+
+    Any row range [a, b) is summarised in O(1) per statistic (``P[b] - P[a]``), so descriptors for thousands of
+    candidate ranges (block grids, boundary refinement) cost nothing extra on 300k-row columns.
+    """
 
     width: int
-    ink: np.ndarray  # (H,) ink pixel count
-    ink_rgb: np.ndarray  # (H, 3) sum of ink pixel colours
-    fill_rgb: np.ndarray  # (H, 3) sum of non-ink pixel colours
-    h_adj: np.ndarray  # (H,)
-    v_adj: np.ndarray  # (H,)
-    d_adj: np.ndarray  # (H,)
-    ink_mask: np.ndarray  # (H, W) bool, kept for column statistics
+    n_rows: int
+    p_ink: np.ndarray  # (H+1,) ink pixel count
+    p_ink_rgb: np.ndarray  # (H+1, 3) sum of ink pixel colours
+    p_fill_rgb: np.ndarray  # (H+1, 3) sum of non-ink pixel colours
+    p_h: np.ndarray  # (H+1,) horizontal ink adjacencies
+    p_v: np.ndarray  # (H+1,)
+    p_d: np.ndarray  # (H+1,)
+    p_rf: np.ndarray  # (H+1,) per-row ink fraction
+    p_rf2: np.ndarray  # (H+1,) its square
+    p_col: np.ndarray  # (H+1, W) int32 ink count per column
 
-    @property
-    def n_rows(self) -> int:
-        return len(self.ink)
+    def range_sum(self, p: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+        return p[ends] - p[starts]
+
+
+def _prefix(a: np.ndarray) -> np.ndarray:
+    out = np.zeros((a.shape[0] + 1,) + a.shape[1:], dtype=np.float64)
+    np.cumsum(a, axis=0, out=out[1:])
+    return out
 
 
 def row_stats(rgb: np.ndarray, ink_luma: int, chunk: int = 8192) -> RowStats:
-    """Per-row sums, computed in row chunks so temporaries stay small on 300k-row columns."""
+    """Per-row statistics as prefix sums, computed in row chunks so temporaries stay small."""
     h_total, width = rgb.shape[:2]
     luma = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
     ink = luma < ink_luma
@@ -83,15 +95,21 @@ def row_stats(rgb: np.ndarray, ink_luma: int, chunk: int = 8192) -> RowStats:
         if n > 0:
             out_v[a : a + n] = (m2[:-1] & m2[1:]).sum(1)
             out_d[a : a + n] = ((m2[:-1, :-1] & m2[1:, 1:]) | (m2[:-1, 1:] & m2[1:, :-1])).sum(1)
+    p_col = np.zeros((h_total + 1, width), np.int32)
+    np.cumsum(ink, axis=0, dtype=np.int32, out=p_col[1:])
+    rf = out_ink / width
     return RowStats(
         width=width,
-        ink=out_ink,
-        ink_rgb=out_ink_rgb,
-        fill_rgb=out_fill_rgb,
-        h_adj=out_h,
-        v_adj=out_v,
-        d_adj=out_d,
-        ink_mask=ink,
+        n_rows=h_total,
+        p_ink=_prefix(out_ink),
+        p_ink_rgb=_prefix(out_ink_rgb),
+        p_fill_rgb=_prefix(out_fill_rgb),
+        p_h=_prefix(out_h),
+        p_v=_prefix(out_v),
+        p_d=_prefix(out_d),
+        p_rf=_prefix(rf),
+        p_rf2=_prefix(rf**2),
+        p_col=p_col,
     )
 
 
@@ -106,28 +124,22 @@ def describe_ranges(stats: RowStats, starts: np.ndarray, ends: np.ndarray) -> np
     ends = np.asarray(ends, int)
     n_px = (ends - starts) * stats.width
 
-    def seg(a: np.ndarray) -> np.ndarray:
-        c = np.concatenate([np.zeros((1,) + a.shape[1:]), np.cumsum(a, axis=0)])
-        return c[ends] - c[starts]
+    def seg(p: np.ndarray) -> np.ndarray:
+        return stats.range_sum(p, starts, ends)
 
-    ink = seg(stats.ink)
+    ink = seg(stats.p_ink)
     fill_n = n_px - ink
-    ink_rgb = seg(stats.ink_rgb)
-    fill_rgb = seg(stats.fill_rgb)
+    ink_rgb = seg(stats.p_ink_rgb)
+    fill_rgb = seg(stats.p_fill_rgb)
     safe_ink = np.maximum(ink, 1)[:, None]
     safe_fill = np.maximum(fill_n, 1)[:, None]
     fill_mean = np.where(fill_n[:, None] > 0, fill_rgb / safe_fill, ink_rgb / safe_ink)
     ink_mean = np.where(ink[:, None] > 0, ink_rgb / safe_ink, fill_mean)
 
-    row_frac = stats.ink / stats.width
-    rf = seg(row_frac)
-    rf2 = seg(row_frac**2)
     nrows = np.maximum(ends - starts, 1)
+    rf, rf2 = seg(stats.p_rf), seg(stats.p_rf2)
     row_spread = np.sqrt(np.maximum(rf2 / nrows - (rf / nrows) ** 2, 0))
-    # column spread: per-range ink count per column
-    colsum = np.zeros((stats.n_rows + 1, stats.width), np.int32)
-    np.cumsum(stats.ink_mask, axis=0, dtype=np.int32, out=colsum[1:])
-    col_frac = (colsum[ends] - colsum[starts]) / nrows[:, None]
+    col_frac = (stats.p_col[ends] - stats.p_col[starts]) / nrows[:, None]
     col_spread = col_frac.std(axis=1)
 
     return np.column_stack(
@@ -135,9 +147,9 @@ def describe_ranges(stats: RowStats, starts: np.ndarray, ends: np.ndarray) -> np
             _lab(fill_mean),
             _lab(ink_mean),
             ink / np.maximum(n_px, 1),
-            seg(stats.h_adj) / safe_ink[:, 0],
-            seg(stats.v_adj) / safe_ink[:, 0],
-            seg(stats.d_adj) / safe_ink[:, 0],
+            seg(stats.p_h) / safe_ink[:, 0],
+            seg(stats.p_v) / safe_ink[:, 0],
+            seg(stats.p_d) / safe_ink[:, 0],
             row_spread,
             col_spread,
         ]
