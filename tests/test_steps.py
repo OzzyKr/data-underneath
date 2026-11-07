@@ -210,3 +210,68 @@ def test_drilling_symbols_and_modifiers_are_not_rock_types(label, rock):
     from lithology.legend import is_rock_type
 
     assert is_rock_type(label) is rock
+
+
+# ---------------------------------------------------------------- naming decisions
+
+
+def _naming_cfg():
+    from lithology.config import load_config
+
+    return load_config().naming
+
+
+def test_naming_agree_named_disagree_unresolved():
+    import numpy as np
+
+    from lithology.naming import decide
+
+    cfg = _naming_cfg()
+    dist = np.array([0.5, 0.6, 5.0])  # classical unsure between 0 and 1
+    agree = decide(dist, np.array([0.90, 0.89, 0.2]), cfg)
+    assert agree.swatch == 0 and agree.confidence == cfg.confidence_agree
+    unsure = decide(dist, np.array([0.89, 0.90, 0.2]), cfg)  # both unsure and they disagree
+    assert unsure.swatch is None and set(unsure.candidates) >= {0, 1}
+    pretrained_sure = decide(dist, np.array([0.70, 0.95, 0.2]), cfg)
+    assert pretrained_sure.swatch == 1
+
+
+def test_template_match_decisive_and_tie_is_unresolved():
+    import numpy as np
+
+    from lithology.naming import decide
+
+    cfg = _naming_cfg()
+    dist = np.array([0.1, 3.0, 4.0])  # classical decisively says 0...
+    exact = decide(dist, None, cfg, template=np.array([0.40, 0.99, 0.50]))  # ...but pixels say 1, clearly
+    assert exact.swatch == 1
+    tie = decide(dist, None, cfg, template=np.array([0.99, 1.00, 0.30]))  # pixel-identical to two swatches
+    assert tie.swatch is None and set(tie.candidates) == {0, 1}
+    no_opinion = decide(dist, None, cfg, template=np.array([0.2, 0.3, 0.1]))  # weak template: classical decides
+    assert no_opinion.swatch == 0
+
+
+def test_template_similarity_finds_identical_pattern_and_respects_colour():
+    import numpy as np
+
+    from lithology.naming import template_similarity
+    from tests.synth import paint
+
+    def swatch(rock):
+        a = np.full((40, 60, 3), 255, np.uint8)
+        paint(a, 0, 40, 0, 60, rock)
+        return a
+
+    col = np.full((80, 40, 3), 255, np.uint8)
+    paint(col, 0, 80, 0, 40, "Shale")
+    sims = template_similarity([[col]], [swatch("Shale"), swatch("Sandstone"), swatch("Siltstone")])
+    assert sims[0, 0] > 0.95 and sims[0, 0] - max(sims[0, 1], sims[0, 2]) > 0.3
+
+
+def test_lenient_name_match():
+    from lithology.evaluate import lenient_match
+
+    assert lenient_match("Sand and Sandstone", "Sandstone")
+    assert lenient_match("SHALE", "Shale")
+    assert not lenient_match("Silty Sandstone", "Siltstone")
+    assert not lenient_match("Unresolved", "Shale")

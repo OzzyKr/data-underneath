@@ -207,6 +207,7 @@ class DocumentResult:
     peak_rss_mb: float = 0.0
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    naming: list[dict[str, Any]] = field(default_factory=list)  # per rock group: both opinions + the decision
 
     @property
     def ok(self) -> bool:

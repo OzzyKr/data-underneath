@@ -150,7 +150,9 @@ def render_annotated(
                 stroke_width=3,
                 stroke_fill=(255, 255, 255, 255),
             )
-            tag = iv.lithology + (f" (c{iv.cluster_id})" if iv.cluster_id is not None else "")
+            unsure = next((n for n in iv.notes if n.startswith("computer vision could not differentiate")), None)
+            tag = ("CV couldn't differentiate: " + unsure.split(": ", 1)[1]) if unsure else iv.lithology
+            tag += f" (c{iv.cluster_id})" if iv.cluster_id is not None else ""
             draw.text(
                 (lx1 + 8, (ya + yb) / 2),
                 tag,

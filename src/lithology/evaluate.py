@@ -23,10 +23,19 @@ def normalise_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
+def lenient_match(pred: str, truth: str) -> bool:
+    """Same rock when every word of one name appears in the other ("Sand and Sandstone" ~ "Sandstone")."""
+    p = set(re.findall(r"[a-z0-9]+", pred.lower()))
+    t = set(re.findall(r"[a-z0-9]+", truth.lower()))
+    return bool(p and t) and (p <= t or t <= p)
+
+
 @dataclass(frozen=True)
 class DocScore:
     labelled_ft: float
-    lithology_accuracy: float  # share of labelled feet whose predicted lithology matches
+    lithology_accuracy: float  # share of labelled feet whose predicted lithology matches exactly
+    lithology_accuracy_lenient: float  # same, counting "Sand and Sandstone" ~ "Sandstone" as a match
+    unresolved_share: float  # share of labelled feet the pipeline declined to name
     boundary_precision: float
     boundary_recall: float
     boundary_f1: float
@@ -90,6 +99,12 @@ def score_document(pred: list[Interval], label: list[Interval], tolerance_ft: fl
     pred_rows = _rows_to_labels(pred, y0, y1, lambda iv: normalise_name(iv.lithology))
     labelled = truth_rows != UNLABELLED
     accuracy = float(np.mean(pred_rows[labelled] == truth_rows[labelled])) if labelled.any() else float("nan")
+    raw_pred = _rows_to_labels(pred, y0, y1, lambda iv: iv.lithology)
+    raw_truth = _rows_to_labels(label, y0, y1, lambda iv: iv.lithology)
+    pairs = Counter(zip(raw_pred[labelled], raw_truth[labelled], strict=True))
+    n_lab = int(labelled.sum()) or 1
+    lenient = sum(n for (p, t), n in pairs.items() if p != UNLABELLED and lenient_match(p, t)) / n_lab
+    unresolved = sum(n for (p, _), n in pairs.items() if normalise_name(p) == "unresolved") / n_lab
 
     truth_b = [iv.top_y for iv in label[1:]]
     pred_b = [iv.top_y for iv in pred if y0 + tol_px < iv.top_y < y1 - tol_px]
@@ -109,6 +124,8 @@ def score_document(pred: list[Interval], label: list[Interval], tolerance_ft: fl
     return DocScore(
         labelled_ft=(y1 - y0) * ft_per_px,
         lithology_accuracy=accuracy,
+        lithology_accuracy_lenient=float(lenient),
+        unresolved_share=float(unresolved),
         boundary_precision=precision,
         boundary_recall=recall,
         boundary_f1=f1,
@@ -127,6 +144,8 @@ def aggregate(scores: dict[str, DocScore]) -> dict[str, float]:
     out: dict[str, float] = {"n_docs": float(len(scores)), "labelled_ft": float(w.sum())}
     for field in (
         "lithology_accuracy",
+        "lithology_accuracy_lenient",
+        "unresolved_share",
         "boundary_precision",
         "boundary_recall",
         "boundary_f1",

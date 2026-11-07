@@ -41,6 +41,17 @@ legend:
   min_swatch_px: 8           # ignore specks smaller than this in either dimension
   ocr_min_conf: 30
 
+naming:
+  abstain: true                    # true: write unresolved_label; false: write the best guess (still flagged)
+  unresolved_label: Unresolved     # CSV name for groups computer vision cannot tell apart
+  classical_decisive_margin: 1.0   # runner-up must be this much further away (fixed-scale distance units)
+  pretrained_decisive_margin: 0.07 # winner's cosine similarity must beat the runner-up by this much
+  template_min_score: 0.85         # pixel template match this good means "drawn with this exact swatch"...
+  template_decisive_margin: 0.05   # ...when it also beats the runner-up by this much
+  confidence_agree: 0.9
+  confidence_one_sure: 0.6
+  confidence_unresolved: 0.2
+
 checks:
   min_thickness_ft: 0.5      # beds thinner than this get lower confidence
   depth_monotonic: true
@@ -53,5 +64,6 @@ runtime:
   workers: 2                 # documents processed in parallel (each in its own process)
 
 ai:
-  tier: 1                    # 1 = classical only; 2 = + local pretrained features; 3 = + cloud LLM
+  tier: 2                    # 1 = classical only; 2 = + local pretrained second opinion (measured to help
+                             #     on black-and-white logs); 3 = + cloud LLM
   provider: none             # none | openai | gemini (tier 3 only)

@@ -16,6 +16,9 @@ dependencies:
   - pandas>=2.2
   - pyarrow>=16
   - pyyaml>=6
+  # tier 2 second opinion (conda-forge build shares one OpenMP runtime with numpy/scikit-learn)
+  - pytorch>=2.4
+  - torchvision>=0.19
   # dashboard back end (Stage 2)
   - duckdb>=1.1
   - fastapi>=0.115

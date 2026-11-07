@@ -60,6 +60,19 @@ class LegendConfig:
 
 
 @dataclass(frozen=True)
+class NamingConfig:
+    abstain: bool
+    unresolved_label: str
+    classical_decisive_margin: float
+    pretrained_decisive_margin: float
+    template_min_score: float
+    template_decisive_margin: float
+    confidence_agree: float
+    confidence_one_sure: float
+    confidence_unresolved: float
+
+
+@dataclass(frozen=True)
 class ChecksConfig:
     min_thickness_ft: float
     depth_monotonic: bool
@@ -88,6 +101,7 @@ class Config:
     segment: SegmentConfig
     cluster: ClusterConfig
     legend: LegendConfig
+    naming: NamingConfig
     checks: ChecksConfig
     render: RenderConfig
     runtime: RuntimeConfig

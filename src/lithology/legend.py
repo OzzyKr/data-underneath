@@ -518,6 +518,13 @@ class Match:
     margin: float  # distance to the runner-up minus distance to the winner (bigger = more certain)
 
 
+def match_distances(cluster_desc: np.ndarray, swatch_desc: np.ndarray) -> np.ndarray:
+    """Fixed-scale distance (clusters x swatches) between match descriptors; lower = more alike."""
+    a = cluster_desc / MATCH_SCALE
+    b = swatch_desc / MATCH_SCALE
+    return np.linalg.norm(a[:, None, :] - b[None, :, :], axis=2)
+
+
 def match_clusters(cluster_desc: np.ndarray, swatch_desc: np.ndarray) -> list[Match]:
     """Nearest swatch per cluster on fixed-scale match descriptors."""
     a = cluster_desc / MATCH_SCALE

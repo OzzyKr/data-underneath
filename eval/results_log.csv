@@ -1,3 +1,6 @@
 timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_accuracy,boundary_precision,boundary_recall,boundary_f1,depth_mae_ft,cluster_ari
 2026-11-07T14:48:20,245b46a,ce49e0f1d756,none,all,smoke: example doc only,1.0,300.0,0.0,0.8824,0.9375,0.9091,0.1159,0.8326
 2026-11-07T14:49:51,245b46a,ce49e0f1d756,none,all,skeleton match descriptors,1.0,300.0,0.1995,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T16:28:03,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2 + template + abstain (example only labelled),1.0,300.0,0.1995,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T16:28:36,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2+template+abstain; lenient metric added,1.0,300.0,0.1995,0.8824,0.9375,0.9091,0.1159,0.8326
+2026-11-07T16:28:58,c316715-dirty,89788cf4acf0,1ae115030da8,dev,tier2+template+abstain; lenient metric,1.0,300.0,0.1995,0.3257,0.6159,0.8824,0.9375,0.9091,0.1159,0.8326

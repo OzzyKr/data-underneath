@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import json
 import logging
-import math
 import resource
 import sys
 import time
@@ -19,8 +19,9 @@ from lithology.cluster import cluster_intervals, merge_adjacent
 from lithology.config import Config
 from lithology.features import match_descriptor
 from lithology.io import Document, crop_rgb, image_dpi, open_image
-from lithology.legend import match_clusters, read_legend, swatch_descriptor
+from lithology.legend import match_distances, read_legend, swatch_descriptor
 from lithology.models import Box, DocumentBoxes, DocumentResult, Interval
+from lithology.naming import decide, template_similarity, unresolved_note
 from lithology.render import render_annotated, write_csv
 from lithology.scale import estimate_scale, prior_px_per_ft
 from lithology.segment import core_box_x, interval_descriptors, segment_column
@@ -61,6 +62,22 @@ def _cluster_match_descriptor(
         if rows >= max_rows:
             break
     return match_descriptor(np.concatenate(parts), cfg.segment.ink_luma)
+
+
+def _inner(swatch_rgb: np.ndarray) -> np.ndarray:
+    """A swatch without its border (central 70%)."""
+    h, w = swatch_rgb.shape[:2]
+    return swatch_rgb[int(h * 0.15) : int(h * 0.85) or h, int(w * 0.15) : int(w * 0.85) or w]
+
+
+def _cluster_patches(column: np.ndarray, filled: list, ids: np.ndarray, c: int, block: int, n: int = 4) -> list:
+    """Pixel crops of a group's thickest intervals, trimmed away from their boundaries."""
+    members = sorted((s for s, i in zip(filled, ids, strict=True) if i == c), key=lambda s: s.top - s.bottom)[:n]
+    out = []
+    for s in members:
+        a, b = (s.top + block, s.bottom - block) if s.bottom - s.top > 3 * block else (s.top, s.bottom)
+        out.append(column[a:b])
+    return out
 
 
 def process(doc: Document, cfg: Config, boxes: DocumentBoxes | None = None) -> DocumentResult:
@@ -114,29 +131,76 @@ def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: Docum
         res.legend = entries
         names: dict[int, str] = {}
         match_conf: dict[int, float] = {}
+        notes: dict[int, str] = {}
         rocks = [e for e in entries if e.is_rock] or entries  # never name a bed after a drilling symbol
         if rocks and len(ids):
             entries = rocks
-            sw = np.array([swatch_descriptor(crop_rgb(img, e.swatch), cfg.segment.ink_luma) for e in entries])
+            sw_rgb = [crop_rgb(img, e.swatch) for e in entries]
+            sw = np.array([swatch_descriptor(s, cfg.segment.ink_luma) for s in sw_rgb])
             n_clusters = int(ids.max()) + 1
             cdesc = np.array(
                 [_cluster_match_descriptor(column, filled, ids, c, seg.block_px, cfg) for c in range(n_clusters)]
             )
-            swatch_of: dict[int, int] = {}
-            for c, m in enumerate(match_clusters(cdesc, sw)):
-                swatch_of[c] = m.swatch
-                names[c] = entries[m.swatch].label
-                # certain when the winner is close and clearly ahead of the runner-up
-                match_conf[c] = float(math.exp(-m.distance / 4.0) * (1 - math.exp(-m.margin)))
-            # Groups the legend calls the same rock are one group: renumber by matched swatch (first appearance),
-            # so cluster ids agree with names and touching intervals of the same rock merge.
-            new_id: dict[int, int] = {}
-            for sw_i in (swatch_of[int(c)] for c in ids):
-                new_id.setdefault(sw_i, len(new_id))
-            remap = {c: new_id[swatch_of[c]] for c in swatch_of}
-            names = {remap[c]: n for c, n in names.items()}
-            match_conf = {remap[c]: min(v for k, v in match_conf.items() if remap[k] == remap[c]) for c in match_conf}
+            dist = match_distances(cdesc, sw)
+            patches = [_cluster_patches(column, filled, ids, c, seg.block_px) for c in range(n_clusters)]
+            inner = [_inner(s) for s in sw_rgb]
+            tmpl = template_similarity(patches, inner)
+            decisions = [decide(dist[c], None, cfg.naming, tmpl[c]) for c in range(n_clusters)]
+            # Ask the pretrained model only where it can change the answer: groups the pixel template and the
+            # classical matcher left open. Settled groups skip it (it is the slowest step).
+            open_groups = [c for c, d in enumerate(decisions) if d.reason == "classical match too close to call"]
+            sim = np.full((n_clusters, len(entries)), np.nan)
+            if cfg.ai.tier >= 2 and open_groups:
+                try:
+                    from lithology.ai.embed import similarity
+
+                    sim[open_groups] = similarity([patches[c] for c in open_groups], inner)
+                    for c in open_groups:
+                        decisions[c] = decide(dist[c], sim[c], cfg.naming, tmpl[c])
+                except Exception as e:  # the second opinion is optional: degrade to classical only
+                    res.warnings.append(f"pretrained second opinion unavailable ({type(e).__name__}: {e})")
+            for c, d in enumerate(decisions):
+                a = np.argsort(dist[c])[:2]
+                rec = {
+                    "group": c,
+                    "classical": [[entries[i].label, round(float(dist[c][i]), 3)] for i in a],
+                    "decision": entries[d.swatch].label if d.swatch is not None else cfg.naming.unresolved_label,
+                    "candidates": [entries[i].label for i in d.candidates],
+                    "reason": d.reason,
+                    "confidence": d.confidence,
+                }
+                if np.isfinite(tmpl[c]).all():
+                    best2 = np.argsort(-tmpl[c])[:2]
+                    rec["template"] = [[entries[i].label, round(float(tmpl[c][i]), 3)] for i in best2]
+                if np.isfinite(sim[c]).all():
+                    b = np.argsort(-sim[c])[:2]
+                    rec["pretrained"] = [[entries[i].label, round(float(sim[c][i]), 3)] for i in b]
+                res.naming.append(rec)
+            # Groups the legend calls the same rock become one group (ids agree with names, touching beds merge).
+            # Unresolved groups with the same candidates share one id: the same ambiguity is the same pattern.
+            key_of = {
+                c: ("rock", d.swatch) if d.swatch is not None else ("open", tuple(sorted(d.candidates)))
+                for c, d in enumerate(decisions)
+            }
+            new_id: dict[tuple, int] = {}
+            for c in ids:
+                new_id.setdefault(key_of[int(c)], len(new_id))
+            remap = {c: new_id[key_of[c]] for c in range(n_clusters) if key_of[c] in new_id}
+            for c, d in enumerate(decisions):
+                if c not in remap:
+                    continue
+                r = remap[c]
+                if d.swatch is not None:
+                    names[r] = entries[d.swatch].label
+                else:
+                    # abstain: say so in the CSV; otherwise write the best guess but keep the uncertainty note
+                    names[r] = cfg.naming.unresolved_label if cfg.naming.abstain else entries[d.candidates[0]].label
+                    notes[r] = unresolved_note([entries[i].label for i in d.candidates])
+                match_conf[r] = min(match_conf.get(r, 1.0), d.confidence)
             ids = np.array([remap[int(c)] for c in ids])
+            n_open = sum(d.swatch is None for c, d in enumerate(decisions) if c in remap)
+            if n_open:
+                res.warnings.append(f"{n_open} rock group(s) could not be named with confidence")
         else:
             res.warnings.append("no legend entries read; intervals named by cluster")
         del column
@@ -154,6 +218,7 @@ def _process(doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: Docum
                 top_depth=scale.depth(y0) if scale else float("nan"),
                 bottom_depth=scale.depth(y1) if scale else float("nan"),
                 confidence=(scale.confidence if scale else 0.3) * match_conf.get(int(c), 0.5),
+                notes=[notes[int(c)]] if int(c) in notes else [],
             )
             intervals.append(iv)
         res.warnings += check_intervals(intervals, lc, cfg.checks)
@@ -165,6 +230,7 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
     out_dir.mkdir(parents=True, exist_ok=True)
     write_csv(res.intervals, out_dir / f"{doc.doc_id}.csv")
     write_csv(res.intervals, out_dir / "diagnostics" / f"{doc.doc_id}.csv", with_diagnostics=True)
+    (out_dir / "diagnostics" / f"{doc.doc_id}_naming.json").write_text(json.dumps(res.naming, indent=1))
     if image and res.boxes is not None:
         img = open_image(doc.image_path)
         title = f"{doc.doc_id}  |  {len(res.intervals)} intervals"
