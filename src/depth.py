@@ -3,16 +3,18 @@ import numpy as np
 import pytesseract
 from sklearn.linear_model import RANSACRegressor, LinearRegression
 from src.data import load_crops
+from PIL import Image
 
-OCR_CFG = "--psm 11 -c tessedit_char_whitelist=0123456789"
-
+OCR_CFG = "--psm 11 -c tessedit_char_whitelist=0123456789,"
 
 def _ocr_hits(img):
     d = pytesseract.image_to_data(img, config=OCR_CFG, output_type=pytesseract.Output.DICT)
-    return [(int(t), l, tp, w, h) for t, l, tp, w, h, c in
-            zip(d["text"], d["left"], d["top"], d["width"], d["height"], d["conf"])
-            if t.isdigit() and len(t) >= 2 and float(c) > 50]
-
+    out = []
+    for t, l, tp, w, h, c in zip(d["text"], d["left"], d["top"], d["width"], d["height"], d["conf"]):
+        t = t.replace(",", "")
+        if t.isdigit() and len(t) >= 2 and float(c) > 50:
+            out.append((int(t), l, tp, w, h))
+    return out
 
 def _rotate(part, rot):
     return part if rot == 0 else part.rotate(rot, expand=True)
@@ -30,16 +32,24 @@ def read_labels(depth_crop, y_offset, chunk=4000, overlap=400):
     """OCR depth labels in any orientation. Returns [(page_y, value)]."""
     g = depth_crop.convert("L")
     W, H = g.size
+    s = max(1.0, 150 / W)  # upscale narrow columns so digits are big enough for OCR
+
+    def prep(y0):
+        part = g.crop((0, y0, W, min(H, y0 + chunk)))
+        if s > 1:
+            part = part.resize((int(part.width * s), int(part.height * s)), Image.LANCZOS)
+        return part
+
     starts = list(range(0, H, chunk - overlap))
-    # pick the orientation that reads the most numbers on up to 3 sample chunks
     sample = starts[::max(1, len(starts) // 3)][:3]
     best = max((0, 90, -90), key=lambda r: sum(
-        len(_ocr_hits(_rotate(g.crop((0, y0, W, min(H, y0 + chunk))), r))) for y0 in sample))
+        len(_ocr_hits(_rotate(prep(y0), r))) for y0 in sample))
     pts = []
     for y0 in starts:
-        part = g.crop((0, y0, W, min(H, y0 + chunk)))
+        part = prep(y0)
         for v, l, tp, w, h in _ocr_hits(_rotate(part, best)):
-            pts.append((y_offset + _page_y(best, y0, part.height, l, tp, w, h), v))
+            y_in_part = _page_y(best, 0, part.height, l, tp, w, h) / s
+            pts.append((y_offset + y0 + y_in_part, v))
     return pts
 
 
