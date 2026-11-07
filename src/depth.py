@@ -6,31 +6,59 @@ from src.data import load_crops
 
 OCR_CFG = "--psm 11 -c tessedit_char_whitelist=0123456789"
 
+
+def _ocr_hits(img):
+    d = pytesseract.image_to_data(img, config=OCR_CFG, output_type=pytesseract.Output.DICT)
+    return [(int(t), l, tp, w, h) for t, l, tp, w, h, c in
+            zip(d["text"], d["left"], d["top"], d["width"], d["height"], d["conf"])
+            if t.isdigit() and len(t) >= 2 and float(c) > 50]
+
+
+def _rotate(part, rot):
+    return part if rot == 0 else part.rotate(rot, expand=True)
+
+
+def _page_y(rot, y0, part_h, l, tp, w, h):
+    if rot == 0:
+        return y0 + tp + h / 2           # horizontal labels
+    if rot == 90:
+        return y0 + l + w / 2            # text reads top -> bottom
+    return y0 + part_h - (l + w / 2)     # rot == -90: bottom -> top
+
+
 def read_labels(depth_crop, y_offset, chunk=4000, overlap=400):
-    """OCR depth labels. Returns [(page_y, value)]."""
+    """OCR depth labels in any orientation. Returns [(page_y, value)]."""
     g = depth_crop.convert("L")
     W, H = g.size
+    starts = list(range(0, H, chunk - overlap))
+    # pick the orientation that reads the most numbers on up to 3 sample chunks
+    sample = starts[::max(1, len(starts) // 3)][:3]
+    best = max((0, 90, -90), key=lambda r: sum(
+        len(_ocr_hits(_rotate(g.crop((0, y0, W, min(H, y0 + chunk))), r))) for y0 in sample))
     pts = []
-    for y0 in range(0, H, chunk - overlap):
-        part = g.crop((0, y0, W, min(H, y0 + chunk))).rotate(90, expand=True)  # labels are vertical
-        d = pytesseract.image_to_data(part, config=OCR_CFG, output_type=pytesseract.Output.DICT)
-        for txt, left, width, conf in zip(d["text"], d["left"], d["width"], d["conf"]):
-            if txt.isdigit() and len(txt) >= 3 and float(conf) > 50:
-                pts.append((y_offset + y0 + left + width / 2, int(txt)))
+    for y0 in starts:
+        part = g.crop((0, y0, W, min(H, y0 + chunk)))
+        for v, l, tp, w, h in _ocr_hits(_rotate(part, best)):
+            pts.append((y_offset + _page_y(best, y0, part.height, l, tp, w, h), v))
     return pts
+
 
 def fit_depth(pts, tol_ft=20):
     """Robust linear fit page_y -> depth. Returns (a, b, n_inliers)."""
+    if len(pts) < 3:
+        raise ValueError(f"only {len(pts)} depth labels read by OCR")
     y = np.array([p[0] for p in pts]).reshape(-1, 1)
     v = np.array([p[1] for p in pts], dtype=float)
     m = RANSACRegressor(LinearRegression(), residual_threshold=tol_ft).fit(y, v)
     return m.estimator_.coef_[0], m.estimator_.intercept_, int(m.inlier_mask_.sum())
+
 
 def depth_mapping(ann, crops):
     y1 = ann["bounding_boxes"]["depth_column"][1]
     pts = read_labels(crops["depth_column"], y1)
     a, b, n = fit_depth(pts)
     return (lambda y: a * y + b), dict(a=a, b=b, n_labels=len(pts), n_inliers=n)
+
 
 if __name__ == "__main__":
     import sys

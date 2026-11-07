@@ -6,7 +6,8 @@ Image.MAX_IMAGE_PIXELS = None  # logs are ~450M pixels
 ROOT = Path("dataset")
 
 def load_annotation(name):
-    with open(ROOT / "bbox_annotation" / f"{Path(name).stem}.json") as f:
+    name = name[:-5] if name.endswith(".json") else name
+    with open(ROOT / "bbox_annotation" / f"{name}.json") as f:
         return json.load(f)
 
 def load_crops(name):
