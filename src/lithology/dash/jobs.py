@@ -25,7 +25,7 @@ from lithology.models import Annotation
 
 log = logging.getLogger(__name__)
 
-STEPS = ["load", "scale", "segment", "cluster", "legend", "assemble", "write", "tiles"]
+STEPS = ["load", "layout", "scale", "segment", "cluster", "legend", "assemble", "write", "tiles"]
 SUMMARY_FIELDS = [
     "doc_id", "ok", "error", "n_intervals", "n_legend", "px_per_ft", "scale_points", "scale_conf", "seconds",
     "peak_rss_mb", "timings", "warnings",

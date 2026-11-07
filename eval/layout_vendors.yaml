@@ -1,0 +1,92 @@
+note: Layout vendors (from TIFF tags, page width and box positions). Used to report the layout detector's IoU as a macro-average over vendors, so the two big vendors (24 of 51 pages) do not dominate.
+vendors:
+  V01:
+    name: d-582 black-and-white scans (one well)
+    documents:
+    - 0000000009_d-582_0000020435-0001_log01_fe_1in_md
+    - 0000000009_d-582_0000020435-0001_log02_fe_5in_md
+    - 0000000009_d-582_0000020435-0001_log03_chromatograph_ratio
+    - 0000000009_d-582_0000020435-0001_log04_fe_5in_md
+    - 0000000009_d-582_0000020435-0001_log05_chromatograph_ratio
+    - 0000000009_d-582_0000020435-0001_log06_fe_5in_md
+    - 0000000009_d-582_0000020435-0001_log07_chromatograph_ratio
+    - 0000000009_d-582_0000020435-0001_log08_fe_5in_md
+    - 0000000009_d-582_0000020435-0001_log09_chromatograph_ratio
+  V02:
+    name: 1534-px-wide template (Geoservices-style)
+    documents:
+    - 60807402860000_gb506#2_md_mudlog
+    - 60811405120000_1inch tvd mudlog
+    - 60811405800000_608114058000_g16786_001_00_00_md5_mud_show_2
+    - 60811405800100_mdn-1_st00bp01_5 inch tvdmudlog_4560ft-22998ft
+    - 60811405800300_mdn-1_st01bp01_5 inch tvdmudlog_4560ft to 20251ft
+    - 60811405800500_608114058005_g16786_001_03_00_tvd5_mud
+    - 60811406050000_608114060500_g31765 001 st00 bp00__master log_5640-28740_5 in_md
+    - 60811406050100_ardennes_ocs-g31765 001 st00 bp01__master log_5640-36552_5 in_md
+    - 60812400480000_ocs-g 26419 001 st00bp00_masterlog_7860-27400_5in_md_2
+    - 60817410140000_mc822#10 1-1200 mud log
+    - 60817410140100_mc822#10bp01 1-240 tvd mud log
+    - 60817411420000_mc_540_#1_st00_bp00_masterlog_3400-24195_5in_md
+    - 60817411700000_mc776-5_5in_md_combo_mud_log_20415_mms
+    - 60817412840000_mc_776_6_ml_mudlog_5757_23721_5in_md_final
+    - 60818400600100_608184006001_g08037_002_01_00_5 inch mudlog_13452ft-19912ft
+  V03:
+    name: NeuraLog (legend at x=79)
+    documents:
+    - 60811404100000_gc743_dc141_st00bp00_mudlog_1in_md_9209_17052-rev
+    - 60812401020000_xom_ocs-g_20351_ju103_st00bp00_mudlog_10200-30900ft_5in_tvd
+    - MC765_P011_ST00BP00_1inchMD_Depth_MudLog_3686-20707ft
+    - MC765_P011_ST00BP00_5inchMD_Depth_MudLog_3686-20707ft
+    - MC765_P011_ST00BP00_5inchTVD_Depth_MudLog_3686-16495ft
+    - MC765_P011_ST00BP01_5inchMD_Depth_MudLog_18230-21150ft
+  V04:
+    name: centred legend (bp gc743, Allegheny)
+    documents:
+    - 60811407300100_bp_gc743_15607_dc222_st00bp01_mudlog_1md_10700-22872
+    - 60811407570000_bp_gc743_15607_dc802_st00bp00_mudlog_5md_6900-17643
+    - '608114075800 - Allegheny Attic GC297 #3 OCS-G 08876 003 ST00 BP00  Mud Log 3346ft-13925ft MD'
+  V05:
+    name: SeeLog (mc761)
+    documents:
+    - 60817411400100_mc761_1_st1_mudlog_1md_17133_22886
+    - 60817411400100_mc761_1_st1_mudlog_1tvd_17129_20968
+    - 60817411400200_mc761_1_st1_bp01_mudlog_1md_17133_25775
+  V06:
+    name: NeuraView (Callaway, Critter, Rio)
+    documents:
+    - Callaway 3-33 mudlog to TD.PDF
+    - Critter Creek 201-1807H_Mud_PDF_Vertical.pdf
+    - Critter Creek 202-1807H_Mud_Vertical_PDF.pdf
+    - Rio_Lavaca_1748_Unit_1_241_MUD
+    - Rio_Nueces_3744_Unit_1_212_MUD_5IN
+    - Rio_Nueces_3744_Unit_1_222_5IN_MUD
+    - Rio_San_Gabriel_2829_Unit_2_272_MUD
+  V07:
+    name: Shell
+    documents:
+    - Shell_08852_KE001_ST01BP00_1inTVD_MudLog_17564-20124ft
+    - Shell_AC0336_OCS-G-36102_001_ST00BP01_5inchMD_MudLog_9100 ft -27770 ft
+  V08:
+    name: hadrian
+    documents:
+    - 60808400140000_hadrian 2_masterlog_2in_10000-21962
+  V09:
+    name: shenzi
+    documents:
+    - 60811405350100_shenzi-sb203-st00bp01_mudlog_4320-27400
+  V10:
+    name: ocs-g 16987
+    documents:
+    - 60812400810000_ocs-g 16987 003 st00bp00_1inmd_mudlog_8921_15721
+  V11:
+    name: neptune
+    documents:
+    - 60818400650000_at0574_4_neptune_1inch_tvdmudlog_6300-17378
+  V12:
+    name: Trail Mtn
+    documents:
+    - Mudlog-Trail Mtn1Palisades
+  V13:
+    name: Freeman
+    documents:
+    - Mudlog_MD_FREEMAN 3 24 ST

@@ -212,6 +212,7 @@ class DocumentResult:
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
     naming: list[dict[str, Any]] = field(default_factory=list)  # per rock group: both opinions + the decision
+    layout: dict[str, Any] = field(default_factory=dict)  # set when the boxes were detected (bonus), not annotated
 
     @property
     def ok(self) -> bool:

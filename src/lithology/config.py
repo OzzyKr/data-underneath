@@ -101,6 +101,24 @@ class AIConfig:
 
 
 @dataclass(frozen=True)
+class LayoutConfig:
+    source: str
+    body_samples: int
+    body_gap_in: float
+    header_search_in: float
+    header_max_in: float
+    depth_bands: int
+    depth_band_in: float
+    depth_cluster_in: float
+    min_track_mm: float
+    depth_snap_in: float
+    max_track_mm: float
+    legend_title_bonus: float
+    legend_unsnapped_penalty: float
+    lith_header_bonus: float
+
+
+@dataclass(frozen=True)
 class Config:
     scale: ScaleConfig
     segment: SegmentConfig
@@ -111,6 +129,7 @@ class Config:
     render: RenderConfig
     runtime: RuntimeConfig
     ai: AIConfig
+    layout: LayoutConfig
 
     def hash(self) -> str:
         """Short stable hash of every value, recorded with each result."""

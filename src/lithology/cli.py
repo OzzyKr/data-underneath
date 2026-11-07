@@ -192,6 +192,15 @@ def run_batch(
 
 
 def cmd_run(a: argparse.Namespace) -> int:
+    if getattr(
+        a, "use_annotations", False
+    ):  # workers load the config from a path: write the override beside the output
+        base = (yaml.safe_load(Path(a.config).read_text()) if a.config else {}) or {}
+        base.setdefault("layout", {})["source"] = "annotation"
+        Path(a.out).mkdir(parents=True, exist_ok=True)
+        forced = Path(a.out) / "_config_use_annotations.yaml"
+        forced.write_text(yaml.safe_dump(base))
+        a.config = str(forced)
     cfg = load_config(Path(a.config) if a.config else None)
     docs = _docs_from(a.inputs)
     if not docs:
@@ -552,6 +561,140 @@ def cmd_dash(a: argparse.Namespace) -> int:
     return 0
 
 
+def _vendor_of(doc_id: str, vendors: dict) -> str:
+    for k, v in vendors.items():
+        if doc_id in v["documents"]:
+            return k
+    return "new:" + doc_id[:24]
+
+
+def cmd_layout(a: argparse.Namespace) -> int:
+    """Bonus: detect the three boxes without annotations; score against the annotations where they exist."""
+    import numpy as np
+    from PIL import ImageDraw
+
+    from lithology.io import crop_rgb, open_image
+    from lithology.layout import detect_boxes
+    from lithology.models import BOX_KEYS, Box
+
+    cfg = load_config(Path(a.config) if a.config else None)
+    docs = _docs_from(a.inputs)
+    if a.only:
+        docs = [d for d in docs if any(o in d.doc_id for o in a.only.split(","))]
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    vend = (yaml.safe_load((REPO / "eval" / "layout_vendors.yaml").read_text()) or {}).get("vendors", {})
+    sel = yaml.safe_load((REPO / "labels" / "selection.yaml").read_text()) or {}
+    holdout = [d["prefix"] for d in sel.get("documents", []) if d.get("split") == "holdout"]
+    rows = []
+    for d in docs:
+        img = open_image(d.image_path)
+        t0 = time.perf_counter()
+        try:
+            lay = detect_boxes(img, cfg.layout)
+        except Exception as e:  # one page must not stop the batch
+            log.error("layout failed on %s: %s", d.doc_id, e)
+            continue
+        secs = time.perf_counter() - t0
+        pred = lay.boxes.to_dict()
+        split = "holdout" if any(d.doc_id.startswith(h) for h in holdout) else "dev"
+        row = {"doc_id": d.doc_id, "vendor": _vendor_of(d.doc_id, vend), "split": split, "seconds": round(secs, 1)}
+        ann = d.annotation()
+        cand_key = {
+            "depth_column": "depth_all",
+            "interpreted_lithology_column": "lith_all",
+            "lithology_legend": "legend_all",
+        }
+        for k in BOX_KEYS:
+            row[f"conf_{k}"] = lay.confidence[k]
+            if ann:
+                gt = Box.from_seq(ann.boxes.to_dict()[k])
+                row[f"iou_{k}"] = round(Box.from_seq(pred[k]).iou(gt), 3)
+                cands = [c for c in lay.diagnostics.get(cand_key[k], [])[:3] if c[2] > c[0] and c[3] > c[1]]
+                row[f"oracle3_{k}"] = round(max([Box.from_seq(c).iou(gt) for c in cands] + [row[f"iou_{k}"]]), 3)
+            else:
+                row[f"iou_{k}"] = row[f"oracle3_{k}"] = ""
+        rows.append(row)
+        record = {"boxes": pred, "confidence": lay.confidence, "diagnostics": lay.diagnostics, **row}
+        (out / f"{d.doc_id}_layout.json").write_text(json.dumps(record, indent=1, default=str))
+        if not a.no_images:  # page preview: detected boxes (thick), annotated boxes (thin black)
+            W, H = img.size
+            s = min(1.0, 3000.0 / H, 1600.0 / W)
+            prev = crop_rgb(img, Box(0, 0, W, H), scale=s)
+            pil = __import__("PIL.Image", fromlist=["Image"]).fromarray(prev)
+            dr = ImageDraw.Draw(pil)
+            col = {
+                "depth_column": (220, 0, 0),
+                "interpreted_lithology_column": (0, 110, 255),
+                "lithology_legend": (255, 140, 0),
+            }
+            for k in BOX_KEYS:
+                if ann:
+                    dr.rectangle([v * s for v in ann.boxes.to_dict()[k]], outline=(0, 0, 0), width=1)
+                dr.rectangle([v * s for v in pred[k]], outline=col[k], width=3)
+            pil.save(out / f"{d.doc_id}_layout.png")
+            # header-only preview at readable resolution (legend + track headers)
+            top = int(lay.diagnostics.get("body", [H, H])[0])
+            hb = Box(0, 0, W, max(2, min(H, top + int(0.5 * (lay.diagnostics.get("dpi") or 200)))))
+            hs = min(1.0, 1600.0 / W)
+            hp = __import__("PIL.Image", fromlist=["Image"]).fromarray(crop_rgb(img, hb, scale=hs))
+            hd = ImageDraw.Draw(hp)
+            for k in BOX_KEYS:
+                if ann:
+                    hd.rectangle([v * hs for v in ann.boxes.to_dict()[k]], outline=(0, 0, 0), width=1)
+                hd.rectangle([v * hs for v in pred[k]], outline=col[k], width=3)
+            hp.save(out / f"{d.doc_id}_layout_header.png")
+        log.info(
+            "%5.1fs  depth %s  lith %s  legend %s  %s",
+            secs,
+            row["iou_depth_column"],
+            row["iou_interpreted_lithology_column"],
+            row["iou_lithology_legend"],
+            d.doc_id[:60],
+        )
+    if not rows:
+        return 2
+    with open(out / "layout_summary.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    summary = {
+        "documents": len(rows),
+        "mean_seconds": round(float(np.mean([r["seconds"] for r in rows])), 1),
+        "max_seconds": max(r["seconds"] for r in rows),
+    }
+    for split in ("dev", "holdout"):
+        rs = [r for r in rows if r["split"] == split and r["iou_depth_column"] != ""]
+        if not rs:
+            continue
+        part = {"pages": len(rs)}
+        for k in BOX_KEYS:
+            v = np.array([r[f"iou_{k}"] for r in rs], float)
+            by: dict[str, list[float]] = {}
+            for r in rs:
+                by.setdefault(r["vendor"], []).append(r[f"iou_{k}"])
+            orc = np.array([r[f"oracle3_{k}"] for r in rs], float)
+            conf = np.array([r[f"conf_{k}"] for r in rs], float)
+            good = v > 0.5
+            pos, neg = conf[good], conf[~good]
+            auroc = (
+                float(np.mean([(p > q) + 0.5 * (p == q) for p in pos for q in neg])) if len(pos) and len(neg) else None
+            )
+            part[k] = {
+                "page_mean": round(float(v.mean()), 3),
+                "vendor_macro": round(float(np.mean([np.mean(x) for x in by.values()])), 3),
+                "iou_gt_0.5": int((v > 0.5).sum()),
+                "iou_lt_0.3": int((v < 0.3).sum()),
+                "oracle3_recall": round(float((orc > 0.5).mean()), 3),
+                "selection_acc": round(float(good[orc > 0.5].mean()), 3) if (orc > 0.5).any() else None,
+                "conf_auroc": round(auroc, 3) if auroc is not None else None,
+            }
+        summary[split] = part
+    (out / "layout_summary.json").write_text(json.dumps(summary, indent=2))
+    log.info("layout summary: %s", json.dumps(summary))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lith", description="Lithology interval extraction from well-log scans")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -563,7 +706,20 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--config")
     r.add_argument("--workers", type=int)
     r.add_argument("--no-images", action="store_true", help="skip annotated images (faster)")
+    r.add_argument(
+        "--detect-boxes",
+        action="store_true",
+        help="ignore annotation files and detect the three boxes (bonus; for end-to-end evaluation)",
+    )
     r.set_defaults(fn=cmd_run)
+
+    lo = sub.add_parser("layout", help="bonus: detect the three boxes without annotations, score against them")
+    lo.add_argument("inputs", nargs="+", help="image files or folders")
+    lo.add_argument("--out", default="out/layout")
+    lo.add_argument("--config")
+    lo.add_argument("--only", help="comma-separated substrings of document names")
+    lo.add_argument("--no-images", action="store_true", help="skip the page previews")
+    lo.set_defaults(fn=cmd_layout)
 
     e = sub.add_parser("eval", help="score predictions against hand labels")
     e.add_argument("--pred", default="out")

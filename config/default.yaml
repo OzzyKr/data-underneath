@@ -78,3 +78,20 @@ ai:
   tier: 2                    # 1 = classical only; 2 = + local pretrained second opinion (measured to help
                              #     on black-and-white logs); 3 = + cloud LLM
   provider: none             # none | openai | gemini (tier 3 only)
+
+layout:                      # STEP 1 of the pipeline: find the depth column, lithology column and legend on the page
+  source: detect             # detect: always detect the boxes (annotation files, if any, are only used to report IoU)
+                             # annotation: use the organisers' boxes when a file exists, detect otherwise (A/B only)
+  body_samples: 3000         # rows sampled down the page to find where the long track rules run
+  body_gap_in: 0.15          # breaks in the track rules shorter than this are bridged (wider merges the header table)
+  header_search_in: 3.0      # the header's bottom rule is searched this far below where the track rules begin
+  header_max_in: 45.0        # never OCR more header than this
+  depth_bands: 5             # body bands OCR'd across the full width for depth numbers
+  depth_band_in: 2.0         # height of each band
+  depth_cluster_in: 0.12     # numbers closer than this in x belong to the same track
+  min_track_mm: 2.5          # narrowest depth / lithology track
+  depth_snap_in: 0.3         # snap a depth box edge to a vertical rule only this close to the labels
+  max_track_mm: 25.0         # widest interpreted lithology track
+  legend_title_bonus: 0.4    # a "Lithology symbols" / "Legend" / "Rock types" title in a header cell
+  legend_unsnapped_penalty: 0.3  # a rock-word cluster no header frame holds (often spans the accessory list too)
+  lith_header_bonus: 1.5     # a "Lithology" / "Interp. Lith" header word above a track

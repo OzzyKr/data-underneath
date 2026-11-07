@@ -74,7 +74,7 @@ def test_step_hook_and_legend_json(synth_dataset, synth_doc, cfg, tmp_path):
     steps: list[str] = []
     res = process(doc, cfg, on_step=steps.append)
     assert res.ok, res.error
-    assert steps == ["load", "scale", "segment", "cluster", "legend", "assemble"]
+    assert steps == ["load", "layout", "scale", "segment", "cluster", "legend", "assemble"]
     write_outputs(doc, res, tmp_path, cfg, image=False)
     legend = json.loads((tmp_path / "diagnostics" / f"{doc.doc_id}_legend.json").read_text())
     by_label = {e["label"]: e for e in legend}

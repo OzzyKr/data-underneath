@@ -120,17 +120,41 @@ def process(
     return res
 
 
+def _layout_step(doc: Document, img, cfg: Config, boxes: DocumentBoxes | None) -> tuple[DocumentBoxes, dict]:
+    """Step 1. Boxes passed in by the caller win; ``layout.source: annotation`` uses the organisers' file when it
+    exists (A/B comparison only); otherwise the detector finds the boxes. An annotation, when present, is only used
+    to record how well the detected boxes match it."""
+    if boxes is not None:
+        return boxes, {"source": "supplied"}
+    ann = doc.annotation()
+    if cfg.layout.source == "annotation" and ann is not None:
+        return ann.boxes, {"source": "annotation"}
+    from lithology.layout import detect_boxes
+
+    lay = detect_boxes(img, cfg.layout)
+    info: dict = {
+        "source": "detected",
+        "boxes": lay.boxes.to_dict(),
+        "confidence": lay.confidence,
+        "low_confidence": [k for k, v in lay.confidence.items() if v < 0.5],
+    }
+    if ann is not None:
+        a, d = ann.boxes.to_dict(), lay.boxes.to_dict()
+        info["iou_vs_annotation"] = {k: round(Box.from_seq(d[k]).iou(Box.from_seq(a[k])), 3) for k in a}
+    return lay.boxes, info
+
+
 def _process(
     doc: Document, cfg: Config, boxes: DocumentBoxes | None, res: DocumentResult, hook: StepHook | None = None
 ) -> None:
     t = res.timings_s
     with _timed(t, "load", hook):
         img = open_image(doc.image_path)
-        if boxes is None:
-            ann = doc.annotation()
-            if ann is None:
-                raise ValueError("no boxes supplied and no annotation file (bonus detector not enabled)")
-            boxes = ann.boxes
+
+    with _timed(t, "layout", hook):  # step 1: where are the depth column, lithology column and legend?
+        boxes, res.layout = _layout_step(doc, img, cfg, boxes)
+        if res.layout.get("low_confidence"):
+            res.warnings.append(f"layout: low confidence for {res.layout['low_confidence']}")
         res.boxes = boxes
         lc = boxes.lithology_column.clip(*img.size)
 
@@ -327,6 +351,8 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
         for e in res.legend
     ]
     (out_dir / "diagnostics" / f"{doc.doc_id}_legend.json").write_text(json.dumps(legend, indent=1))
+    if res.layout:
+        (out_dir / "diagnostics" / f"{doc.doc_id}_layout.json").write_text(json.dumps(res.layout, indent=1))
     if image and res.boxes is not None:
         img = open_image(doc.image_path)
         title = f"{doc.doc_id}  |  {len(res.intervals)} intervals"
