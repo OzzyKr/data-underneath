@@ -18,3 +18,6 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T21:53:02,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,trial: colour veto + bed-level exact match,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-07T21:58:46,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,colour veto,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-08T09:03:31,3c2e53e-dirty,b8572e77e97b,1ae115030da8,dev,example with no box file: layout detector boxes,1.0,300.0,0.822,0.9143,0.0,0.7059,0.75,0.7273,0.1142,0.8271
+2026-11-08T10:16:59,4095b5a-dirty,b8572e77e97b,1ae115030da8,dev,baseline before generic test-set fixes,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-08T10:21:07,4095b5a-dirty,b8572e77e97b,1ae115030da8,dev,"generic fixes: box-file folders, short-column depth OCR, rock abbreviations, a/o, frame slivers",1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1182,0.902
+2026-11-08T10:29:29,4095b5a-dirty,b8572e77e97b,1ae115030da8,dev,"generic fixes (final): box-file folders, short-column depth OCR, rock abbreviations, a/o OCR, frame-line slivers",1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1182,0.902

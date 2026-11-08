@@ -48,6 +48,19 @@ def _sha256(path: Path, chunk: int = 1 << 22) -> str:
     return h.hexdigest()
 
 
+ANNOTATION_DIRS = ("bbox_annotation", "annotations")  # sibling folders of images/ that may hold the box files
+
+
+def find_annotation(image: Path, annotations_dir: Path | None = None) -> Path | None:
+    """The box file of an image: in ``annotations_dir`` if given, else a known sibling folder or beside the image."""
+    dirs = [Path(annotations_dir)] if annotations_dir else [image.parent.parent / d for d in ANNOTATION_DIRS]
+    for d in [*dirs, image.parent]:
+        a = d / f"{image.stem}.json"
+        if a.exists():
+            return a
+    return None
+
+
 def discover(images_dir: Path, annotations_dir: Path | None = None) -> Discovery:
     """List log images, pair them with annotations, and skip non-images and byte-identical duplicates.
 
@@ -55,7 +68,6 @@ def discover(images_dir: Path, annotations_dir: Path | None = None) -> Discovery
     Of a duplicate group, the copy that has an annotation (then the shortest name) is kept.
     """
     images_dir = Path(images_dir)
-    annotations_dir = Path(annotations_dir) if annotations_dir else images_dir.parent / "bbox_annotation"
     skipped: list[tuple[Path, str]] = []
     candidates: list[Path] = []
     for p in sorted(images_dir.iterdir()):
@@ -65,8 +77,7 @@ def discover(images_dir: Path, annotations_dir: Path | None = None) -> Discovery
             skipped.append((p, "not a TIFF image"))
 
     def ann_for(p: Path) -> Path | None:
-        a = annotations_dir / f"{p.stem}.json"
-        return a if a.exists() else None
+        return find_annotation(p, annotations_dir)
 
     by_size: dict[int, list[Path]] = defaultdict(list)
     for p in candidates:

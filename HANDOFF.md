@@ -49,6 +49,21 @@ and `lith eval --pred out --labels labels --split dev`. Plans: `~/.claude/plans/
 Eye-audit labels are Claude's reading of column vs legend, not ground truth: use them to compare runs, never as an
 accuracy claim. The only official interval truth is `example/example.csv` (log06).
 
+## Test set (`dataset/test`, 3 logs, checked by eye 2026-11-08)
+Layout: `images/`, `annotations/` (box files), `vis/`. Box files are found under `bbox_annotation/`, `annotations/` or
+beside the image. Detector vs box files: identical names and 98-99% of bed edges on the two colour logs (+3-6 s/log);
+on the b&w Nichols log the detector's legend box swallows the Accessories panel (IoU 0.22).
+- Woody (colour, 18,000 ft): every sampled bed right, edges on the scan's depth ticks.
+- gb506#2 TVD (colour, 2 px/ft): thick beds right (~95% of depth); interbeds of 3 ft or less blend into mixed colours
+  named Diatomite / Chert / Plastic Clay (open). "Huile" (oil symbol) is still read as a rock (open).
+- Nichols (b&w, 300 dpi): depths now read (15.05 px/ft); fine sand is named "Brec" because the legend's 2-letter "Ss"
+  entry is never read (open).
+
+Generic fixes kept (dev: example and eye audit unchanged, 0 errors): box-file folders; depth OCR windows cover short
+columns end to end, labels counted once; abbreviated rock names ("Lmst", "Anhy", "Dol") pass the short-word filter
+but still need a rock-like swatch; OCR a/o confusion ("Siltstane", "Fassils"); a thin end segment holding only paper
+and one full-width rule is the track frame (removed fake 12-17 px beds at the column ends of 13 dev logs).
+
 ## Labelling (in progress)
 Kit in `labels/kit/` (see `HOW_TO_LABEL.md`). Dev: 01 mc765 (edited, **uncommitted**), 02 rio, 03 shenzi, 04 mc761, 08 bw_log04. Holdout: 05 shell, 06 xom, 07 neptune.
 Conventions: write the true rock (never "Unresolved"); b&w sand = `Sandstone`; label thin beds too.

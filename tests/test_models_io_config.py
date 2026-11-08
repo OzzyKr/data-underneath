@@ -106,6 +106,18 @@ def test_discover_skips_duplicates_and_non_images(tmp_path):
     assert "Thumbs.db" in reasons
 
 
+def test_discover_finds_box_files_under_common_folder_names(tmp_path):
+    for folder in ("annotations", "images"):
+        root = tmp_path / folder
+        images = root / "images"
+        images.mkdir(parents=True)
+        Image.new("RGB", (10, 10)).save(images / "a.tif")
+        anns = root / folder if folder != "images" else images
+        anns.mkdir(exist_ok=True)
+        (anns / "a.json").write_text("{}")
+        assert discover(images).documents[0].annotation_path == anns / "a.json"
+
+
 def test_crop_rgb_matches_numpy_and_handles_1bit():
     arr = (np.random.default_rng(0).random((500, 40, 3)) * 255).astype(np.uint8)
     img = Image.fromarray(arr)

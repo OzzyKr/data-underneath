@@ -157,7 +157,7 @@ def read_depth_labels(img: Image.Image, dc: Box, doc_id: str, cfg: ScaleConfig) 
     upscale = 2.0 if dpi < 180 else 1.0
     pad = max(4, dc.width // 10)
     col = Box(max(0, dc.x0 - pad), dc.y0, min(img.width, dc.x1 + pad), dc.y1)
-    n_windows = max(1, min(cfg.n_windows, col.height // win))  # windows never overlap
+    n_windows = max(1, min(cfg.n_windows, -(-col.height // win)))  # short columns are covered end to end
     starts = np.linspace(col.y0, max(col.y0, col.y1 - win), n_windows).round().astype(int).tolist()
 
     def window(y0: int) -> np.ndarray:
@@ -195,13 +195,12 @@ def estimate_scale(img: Image.Image, dc: Box, doc_id: str, cfg: ScaleConfig) -> 
     labels = read_depth_labels(img, dc, doc_id, cfg)
     n_tokens = len({lb.token for lb in labels})
     fit = fit_line(labels, cfg.ransac_residual_ft)
-    if fit is None or len(fit[2]) < cfg.min_points:
-        n = 0 if fit is None else len(fit[2])
-        warnings.append(f"depth OCR found only {n} consistent labels (of {n_tokens} read)")
+    # labels read twice in overlapping windows count once
+    uniq = {(round(lb.y / 3), lb.depth): lb for lb in fit[2]} if fit else {}
+    if len(uniq) < cfg.min_points:
+        warnings.append(f"depth OCR found only {len(uniq)} consistent labels (of {n_tokens} read)")
         return None, warnings
     s, b, inliers = fit
-    # Labels read twice in overlapping windows count once.
-    uniq = {(round(lb.y / 3), lb.depth): lb for lb in inliers}
     y = np.array([lb.y for lb in uniq.values()])
     d = np.array([lb.depth for lb in uniq.values()])
     resid = float(np.median(np.abs(d - (s * y + b))))

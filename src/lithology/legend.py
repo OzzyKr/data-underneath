@@ -251,12 +251,32 @@ def swatch_is_texture(rgb: np.ndarray, ink_luma: int = 110) -> bool:
     return bool(sum(c.size > 0 and c.mean() > 0.01 for c in cells) >= 6)
 
 
+def _is_subsequence(short: str, long: str) -> bool:
+    it = iter(long)
+    return all(c in it for c in short)
+
+
+def abbreviates_rock(word: str) -> bool:
+    """A short word that abbreviates a rock name: its first 3+ letters ("Anhy", "Dol") or 4+ of its consonants
+    ("Lmst"). Three-consonant words are left out: most are tool or test acronyms ("MDT", "LWD")."""
+    if len(word) < 3:
+        return False
+    for name in ROCK_WORDS:
+        if name in MODIFIER_WORDS or _non_rock_word(name) or len(name) <= len(word) or name[0] != word[0]:
+            continue
+        consonants = len(word) >= 4 and not set(word[1:]) & set("aeiou")
+        if name.startswith(word) or (consonants and _is_subsequence(word, name)):
+            return True
+    return False
+
+
 def is_rock_type(label: str, swatch_rgb: np.ndarray | None = None) -> bool:
     """Can a bed be named after this legend entry?
 
     1. A rock word (after spelling correction): rock.
     2. A drilling, show, accessory or alteration word, or only modifiers: not a rock.
     3. Unknown words only: rock if the swatch is a fill texture; without a swatch, any word of 5+ letters.
+       Shorter words count only when they abbreviate a rock name; the swatch must still be a fill.
     """
     words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
     if not words:
@@ -265,7 +285,7 @@ def is_rock_type(label: str, swatch_rgb: np.ndarray | None = None) -> bool:
         return True
     if any(_non_rock_word(w) for w in words) or all(w in MODIFIER_WORDS for w in words):
         return False
-    if max(len(w) for w in words) < 5:
+    if max(len(w) for w in words) < 5 and not any(abbreviates_rock(w) for w in words):
         return False
     return swatch_is_texture(swatch_rgb) if swatch_rgb is not None else True
 
@@ -299,7 +319,7 @@ class _Phrase:
     words: list[_Word] = field(default_factory=list)
 
 
-_CONFUSABLE = ("il1tfj|", "o0ce", "s5", "b6h", "rn", "uv", "z2", "g9q")
+_CONFUSABLE = ("il1tfj|", "o0ce", "ao", "s5", "b6h", "rn", "uv", "z2", "g9q")
 
 
 def _confusable(a: str, b: str) -> bool:

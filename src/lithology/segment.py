@@ -199,6 +199,28 @@ def _ignore_thin_lines(fill: np.ndarray, ink_frac: np.ndarray, max_blocks: int) 
     return out
 
 
+def _blank_frame_ends(stats: RowStats, segments: list[Segment], max_px: int, cfg: SegmentConfig) -> None:
+    """Mark a thin end segment that holds only paper and one full-width rule as blank: it is the track's frame.
+
+    A pattern of full-width lines repeats, so a segment with more than one rule is left alone.
+    """
+    if len(segments) < 2:
+        return
+    row_ink = np.diff(stats.p_rf)
+    for s in (segments[0], segments[-1]):
+        if s.blank or s.bottom - s.top > max_px:
+            continue
+        ink = row_ink[s.top : s.bottom]
+        rule = ink > 0.8
+        n_rules = int(rule[0]) + int(np.count_nonzero(rule[1:] & ~rule[:-1]))
+        if n_rules != 1 or rule.all() or ink[~rule].mean() >= cfg.blank_ink_fraction:
+            continue
+        n_ink = stats.p_ink[s.bottom] - stats.p_ink[s.top]
+        fill = (stats.p_fill_rgb[s.bottom] - stats.p_fill_rgb[s.top]) / max(1, stats.width * (s.bottom - s.top) - n_ink)
+        if float(fill @ np.array([0.299, 0.587, 0.114])) > cfg.blank_fill_luma:
+            s.blank = True
+
+
 def segment_column(rgb: np.ndarray, px_per_ft: float, cfg: SegmentConfig) -> Segmentation:
     """Segment a column crop (H, W, 3); rows in the result are relative to the crop.
 
@@ -247,6 +269,7 @@ def segment_column(rgb: np.ndarray, px_per_ft: float, cfg: SegmentConfig) -> Seg
         inside = (starts >= a) & (ends <= b)
         frac = float(block_blank[inside].mean()) if inside.any() else 0.0
         segments.append(Segment(top=a, bottom=b, blank=frac >= 0.5))
+    _blank_frame_ends(stats, segments, max(2 * block, int(round(cfg.min_thickness_ft * px_per_ft))), cfg)
     log.debug("segmented %d rows into %d segments (block %d px)", h, len(segments), block)
     return Segmentation(segments=segments, stats=stats, scaler=scaler, block_px=block)
 

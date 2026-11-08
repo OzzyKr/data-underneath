@@ -128,6 +128,7 @@ def test_scaler_floor_prevents_division_blowup():
         ("Slltstone", "Siltstone"),
         ("Anhydrlte", "Anhydrite"),
         ("Dolomites", "Dolomites"),
+        ("Siltstane", "Siltstone"),
         ("Shale", "Shale"),
         ("Mud", "Mud"),
     ],
@@ -218,6 +219,10 @@ def test_csv_roundtrip_and_render(tmp_path, synth_doc):
         ("Bitumen", True),
         ("QUARTZ LATITE", True),
         ("Silstone", True),
+        ("Lmst", True),
+        ("Anhy", True),
+        ("MDT", False),
+        ("Mrlst", True),
     ],
 )
 def test_drilling_symbols_and_modifiers_are_not_rock_types(label, rock):
@@ -304,6 +309,9 @@ def test_unknown_words_are_decided_by_the_swatch_picture():
     glyph[16:24, 26:34] = 0  # one small symbol in the middle
     assert is_rock_type("Porphyry", fill) is True
     assert is_rock_type("Porphyry", glyph) is False
+    # a short abbreviation of a rock name still needs a rock-like swatch ("MDT" is a tool symbol, not mudstone)
+    assert is_rock_type("Lmst", fill) is True
+    assert is_rock_type("MDT", glyph) is False
 
 
 @pytest.mark.parametrize(

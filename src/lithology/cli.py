@@ -20,7 +20,7 @@ import yaml
 
 from lithology import __version__
 from lithology.config import load_config
-from lithology.io import Document, discover
+from lithology.io import Document, discover, find_annotation
 
 log = logging.getLogger("lithology")
 REPO = Path(__file__).resolve().parents[2]
@@ -52,8 +52,7 @@ def _docs_from(paths: list[str]) -> list[Document]:
                 log.info("skip %s: %s", skipped.name, why)
             docs += disc.documents
         else:
-            ann = p.parent.parent / "bbox_annotation" / f"{p.stem}.json"
-            docs.append(Document(p.stem, p, ann if ann.exists() else None))
+            docs.append(Document(p.stem, p, find_annotation(p)))
     return docs
 
 
