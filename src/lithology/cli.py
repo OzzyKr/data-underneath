@@ -572,6 +572,7 @@ def cmd_layout(a: argparse.Namespace) -> int:
     import os
 
     os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+    os.environ.setdefault("OMP_NUM_THREADS", "1")  # workers inherit both; a BLAS sized above the limit hangs
     import numpy as np
     from PIL import ImageDraw
 

@@ -235,3 +235,13 @@ def test_unknown_api_route_is_a_404_not_the_page(dash_repo):
         assert c.get("/csv/some-log").text.startswith("<!doctype html>")  # page routes still get the page
         r = c.get("/api/not-a-route")
         assert r.status_code == 404 and "restart the dashboard" in r.json()["detail"]
+
+
+def test_dashboard_thread_limit_keeps_openmp_consistent():
+    """Live-run workers inherit the dashboard's environment: an OpenMP thread limit without a matching thread count
+    makes an OpenMP BLAS spin forever in the ResNet step."""
+    import os
+
+    import lithology.dash.layout  # noqa: F401  (sets the limit on import)
+
+    assert os.environ.get("OMP_THREAD_LIMIT") != "1" or os.environ.get("OMP_NUM_THREADS") == "1"

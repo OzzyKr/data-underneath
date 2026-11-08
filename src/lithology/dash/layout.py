@@ -23,7 +23,10 @@ from lithology.dash.titles import short_title
 from lithology.io import crop_rgb, depth_reference, discover, image_dpi, open_image, scale_inches_per_100ft
 from lithology.models import BOX_KEYS, Box
 
+# One OpenMP thread per Tesseract process (bands are read concurrently). Live-run workers inherit this, so the
+# thread count is capped too: an OpenMP BLAS sized for more threads than the limit spins forever in matrix products.
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 IMAGE_EXT = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 MAX_CROP_W = 1800
