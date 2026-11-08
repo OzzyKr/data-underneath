@@ -72,7 +72,7 @@ export default function CsvPage() {
         />
         <Stat
           label="Processing"
-          value={`${seconds(log.seconds)} · ${memory(log.peak_rss_mb)}`}
+          value={`${seconds(log.seconds)}, ${memory(log.peak_rss_mb)}`}
           hint="Pipeline time and peak memory for this scan, on a laptop CPU."
         />
       </div>
@@ -143,7 +143,7 @@ export default function CsvPage() {
           </div>
         </div>
         <div className="border-t border-line px-5 py-3 text-xs text-faint">
-          {fmt(rows?.length ?? 0)} rows · click a row to see the bed on the scan
+          {fmt(rows?.length ?? 0)} rows
         </div>
       </section>
     </div>

@@ -125,7 +125,7 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
             >
               <span className="text-ink">Drop a scan</span>
               <span className="text-muted">
-                .tif / .png, box file .json optional ·{" "}
+                .tif or .png, optional .json, or{" "}
                 <button type="button" onClick={() => input.current?.click()} className="text-ink underline underline-offset-2">
                   browse
                 </button>
@@ -193,7 +193,7 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
                 <div className="flex flex-col gap-2">
                   <p className="flex items-center gap-2 text-sm text-muted">
                     <Check size={15} className="text-[#6fbf7a]" aria-hidden="true" />
-                    Pipeline {seconds(run.pipeline_seconds)} · peak memory {memory(run.peak_rss_mb)}
+                    Pipeline {seconds(run.pipeline_seconds)}, peak memory {memory(run.peak_rss_mb)}
                   </p>
                   {run.boxes && <BoxesNote boxes={run.boxes} />}
                 </div>

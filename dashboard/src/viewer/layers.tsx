@@ -145,7 +145,7 @@ export function labelLayers(o: {
         </span>
         {lh >= 30 && (
           <span className="whitespace-nowrap pl-4 font-mono text-[11px] leading-4 text-faint">
-            {fmt(r.top_depth, 1)} – {fmt(r.bottom_depth, 1)} ft{r.cluster_id != null ? ` · c${r.cluster_id}` : ""}
+            {fmt(r.top_depth, 1)}–{fmt(r.bottom_depth, 1)} ft{r.cluster_id != null ? `, cluster ${r.cluster_id}` : ""}
           </span>
         )}
       </button>,
@@ -158,7 +158,7 @@ export function HiddenNote({ n }: { n: number }) {
   if (n <= 0) return null;
   return (
     <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line-2 bg-panel px-3 py-1 text-xs text-muted shadow-lg shadow-black/40">
-      {n} thin {n === 1 ? "bed" : "beds"} without a label here · zoom in
+      {n} thin {n === 1 ? "bed" : "beds"} not labelled at this zoom
     </div>
   );
 }

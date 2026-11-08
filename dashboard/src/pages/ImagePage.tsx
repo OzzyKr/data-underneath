@@ -91,10 +91,10 @@ export default function ImagePage() {
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <span className="tabular text-[13px] text-muted">
             {view === "page"
-              ? "The page as delivered, true to scale · hover for depth, click to open the column there"
+              ? "True to scale"
               : range[0] != null && range[1] != null
-                ? `${fmt(range[0])} – ${fmt(range[1])} ft in view · ${fmt(intervals.length)} beds`
-                : `${log.title} · ${fmt(intervals.length)} beds`}
+                ? `${fmt(range[0])}–${fmt(range[1])} ft in view, ${fmt(intervals.length)} beds`
+                : `${log.title}, ${fmt(intervals.length)} beds`}
           </span>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2.5">
@@ -198,7 +198,7 @@ function SelectedBed({ log, iv, count, onStep }: { log: LogDetail; iv: Interval 
         )}
       </div>
       {!iv ? (
-        <p className="m-0 text-[13px] leading-relaxed text-muted">Click a bed, a label or a row below.</p>
+        <p className="m-0 text-[13px] leading-relaxed text-muted">None</p>
       ) : (
         <>
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -216,13 +216,13 @@ function SelectedBed({ log, iv, count, onStep }: { log: LogDetail; iv: Interval 
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
             <dt className="text-faint">Depth</dt>
             <dd className="tabular m-0 font-mono">
-              {fmt(iv.top_depth, 2)} – {fmt(iv.bottom_depth, 2)} ft
+              {fmt(iv.top_depth, 2)}–{fmt(iv.bottom_depth, 2)} ft
             </dd>
             <dt className="text-faint">Thickness</dt>
             <dd className="tabular m-0 font-mono">{fmt(iv.thickness_ft, 1)} ft</dd>
             <dt className="text-faint">Pixels</dt>
             <dd className="tabular m-0 font-mono">
-              y {iv.top_y} – {iv.bottom_y}
+              y {iv.top_y}–{iv.bottom_y}
             </dd>
             <dt className="text-faint">Confidence</dt>
             <dd className="tabular m-0 font-mono">{fmt(iv.confidence, 2)}</dd>
@@ -267,7 +267,6 @@ function BedList({
     <section aria-label="Beds" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line">
       <div className="flex items-center border-b border-line px-4 py-2.5 text-xs text-faint">
         Beds
-        <span className="ml-auto">in view are bright</span>
       </div>
       <div
         ref={scroller}
@@ -319,14 +318,14 @@ function LegendMatch({ log }: { log: LogDetail }) {
             )}
             <span className="truncate">{e.label}</span>
             <span className="tabular ml-auto shrink-0 font-mono text-xs text-muted">
-              {e.cluster_id != null ? `c${e.cluster_id} · ` : ""}
-              {e.beds}
+              {e.cluster_id != null ? `cluster ${e.cluster_id}, ` : ""}
+              {e.beds} {e.beds === 1 ? "bed" : "beds"}
             </span>
           </div>
         ))}
         <p className="m-0 leading-relaxed">
           {unused ? `${unused} more legend ${unused === 1 ? "entry" : "entries"} not in this log` : ""}
-          {unused && symbols ? " · " : ""}
+          {unused && symbols ? ", " : ""}
           {symbols ? `${symbols} drilling ${symbols === 1 ? "symbol" : "symbols"} ignored` : ""}
         </p>
         {log.tiles?.legend && <img src={`/tiles/${log.log_id}/legend.webp`} alt="The log's legend" className="w-full rounded-sm bg-paper" />}

@@ -141,8 +141,15 @@ NOTE_SYSTEM = (
     "could not tell two rocks apart (the CSV then holds its flagged best guess). "
     "Write one or two plain sentences, at most 45 words, for geoscientists. Use exact numbers "
     "from the data, with units. No hype and nothing the data does not show. If a value looks implausible (for "
-    "example one rock making up almost a whole well), say it is worth checking against the scan. Plain text only."
+    "example one rock making up almost a whole well), say it is worth checking against the scan. Plain text only, "
+    "commas instead of dashes or dots between phrases."
 )
+
+
+def plain(text: str) -> str:
+    """House style for model text shown in the dashboard: no em dashes or middle dots between phrases."""
+    text = re.sub(r"\s*[—·]\s*", ", ", text)
+    return re.sub(r"\s+,", ",", text).strip(" ,")
 
 
 def _pct(x: float) -> str:
@@ -221,9 +228,9 @@ def note(card: str, data: Any, provider: Provider, cache: NoteCache, *, regenera
     key = f"{card}:{_data_key(card, data)}"
     cached = cache.get(key)
     if cached and not regenerate:
-        return {**cached, "cached": True}
+        return {**cached, "text": plain(cached.get("text") or ""), "cached": True}
     if regenerate and provider.name != "none":
-        text = provider.complete(NOTE_SYSTEM, f"Chart: {card}\nData (JSON):\n{json.dumps(_compact(card, data))}")
+        text = plain(provider.complete(NOTE_SYSTEM, f"Chart: {card}\nData (JSON):\n{json.dumps(_compact(card, data))}"))
         rec = {"text": text, "source": "ai", "provider": provider.name, "model": provider.model,
                "at": dt.datetime.now().isoformat(timespec="seconds")}  # fmt: skip
         cache.put(key, rec)
@@ -410,7 +417,7 @@ def ask(
     if provider.name == "none":
         hit = cache.get(key)
         if hit:
-            return {**hit, "cached": True}
+            return {**hit, "answer": plain(hit.get("answer") or ""), "cached": True}
         raise AIError("AI is offline. Pick a provider in the top bar, or ask a question that was answered before.")
     t0 = time.perf_counter()
     queries: list[str] = []
@@ -439,7 +446,7 @@ def ask(
         return f"Error: unknown tool {name}", True, False
 
     text = provider.tool_loop(ASK_SYSTEM, question, ASK_TOOLS, execute)
-    answer = str(final.get("text") or text or "").strip()
+    answer = plain(str(final.get("text") or text or ""))
     if not answer:
         raise AIError("the model returned no answer")
     chart = None

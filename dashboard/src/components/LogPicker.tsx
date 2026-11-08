@@ -64,7 +64,7 @@ export default function LogPicker({ current }: { current?: string }) {
           <div role="listbox" className="overflow-y-auto py-1.5">
             {groups.map(([group, items]) => (
               <div key={group} className="py-1">
-                <div className="px-3.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-faint">{group}</div>
+                <div className="px-3.5 pb-1 pt-2 text-[11px] font-medium text-faint">{group}</div>
                 {items.map((l) => (
                   <button
                     key={l.log_id}

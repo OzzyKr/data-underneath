@@ -1,7 +1,5 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
-@import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource-variable/source-sans-3";
 
 /* Graphite surfaces, one Viridien-violet accent (approved mock, a touch brighter). */
 @theme {
@@ -20,8 +18,8 @@
   --color-select: #8f74ea;
   --color-rose: #e39ab0;
   --color-paper: #fbfbf9;
-  --font-sans: "Inter Variable", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Source Sans 3 Variable", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-sans); /* one typeface throughout: numbers use tabular figures, not a code font */
 }
 
 html,
@@ -44,7 +42,8 @@ body {
   outline-offset: 2px;
 }
 
-.tabular {
+.tabular,
+.font-mono {
   font-variant-numeric: tabular-nums;
 }
 

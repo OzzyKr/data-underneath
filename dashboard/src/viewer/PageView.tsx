@@ -287,11 +287,11 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
             {layers}
           </div>
         </div>
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-8 items-center overflow-hidden border-b border-line bg-nav/95 text-[10px] uppercase tracking-wider text-faint">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-8 items-center overflow-hidden border-b border-line bg-nav/95 text-[11px] text-faint">
           <span className="absolute whitespace-nowrap text-right" style={{ left: LEFT - 8, width: RULER - 12 }}>
             Depth ft
           </span>
-          <span className="absolute flex gap-3 normal-case tracking-normal" style={{ left: xPage }}>
+          <span className="absolute flex gap-3" style={{ left: xPage }}>
             {REGIONS.map((r) => (
               <span key={r.key} className="flex items-center gap-1.5 text-[11px] text-muted">
                 <span className="h-2.5 w-2.5 rounded-[2px] border-2" style={{ borderColor: r.color }} />

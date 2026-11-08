@@ -246,7 +246,7 @@ export default function StripLog({ log, intervals, selected, onSelect, span, jum
   layers.push(...labelLayers({ placed, xFrom: xPred + PRED + 3, xLabel, W, H, selected, onSelect, onHover: setHover }));
 
   const head = (x: number, w: number, text: string, align: "left" | "center" | "right" = "center") => (
-    <span key={text} className="absolute truncate text-[10px] uppercase tracking-wider text-faint" style={{ left: x, width: w, top: 9, textAlign: align }}>
+    <span key={text} className="absolute truncate text-[11px] text-faint" style={{ left: x, width: w, top: 9, textAlign: align }}>
       {text}
     </span>
   );
@@ -355,12 +355,12 @@ export function Minimap({
 
   return (
     <div className="relative w-[70px] shrink-0 border-l border-line">
-      <span className="absolute inset-x-0 top-0 h-8 border-b border-line pt-[9px] text-center text-[10px] uppercase tracking-wider text-faint">Log</span>
+      <span className="absolute inset-x-0 top-0 h-8 border-b border-line pt-[9px] text-center text-[11px] text-faint">Log</span>
       {ticks.map((dp) => {
         const y = yAt(dp);
         if (y == null || y < y0 || y > y1) return null;
         return (
-          <span key={dp} className="absolute left-1.5 -translate-y-1/2 font-mono text-[10px] text-faint" style={{ top: pad + ((y - y0) / span) * mh }}>
+          <span key={dp} className="absolute left-1.5 -translate-y-1/2 font-mono text-[11px] text-faint" style={{ top: pad + ((y - y0) / span) * mh }}>
             {shortDepth(dp)}
           </span>
         );

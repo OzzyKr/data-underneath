@@ -7,7 +7,7 @@ export default function ProviderSwitch() {
   const set = useSetProvider();
   const { open, setOpen, ref } = usePopover();
   const active = data?.providers.find((p) => p.name === data.active);
-  const label = active ? (active.name === "none" ? active.label : `${active.label} · ${data?.model ?? ""}`) : "AI";
+  const label = active ? (active.name === "none" ? active.label : `${active.label} (${data?.model ?? ""})`) : "AI";
 
   return (
     <div ref={ref} className="relative">

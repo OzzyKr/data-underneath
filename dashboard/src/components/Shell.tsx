@@ -59,7 +59,7 @@ export default function Shell() {
         </div>
         <p className="mt-auto px-3 text-xs leading-relaxed text-faint">
           {meta ? `${meta.logs} logs` : ""}
-          {meta?.holdout_hidden ? ` · ${meta.holdout_hidden} holdout hidden` : ""}
+          {meta?.holdout_hidden ? `, ${meta.holdout_hidden} holdout hidden` : ""}
         </p>
       </nav>
 

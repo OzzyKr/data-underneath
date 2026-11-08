@@ -23,7 +23,7 @@ export default function InsightsPage() {
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
-          <span className="text-sm text-muted">{fmt(h.logs)} scanned well logs, turned into one dataset you can question.</span>
+          <span className="text-sm text-muted">{fmt(h.logs)} well logs</span>
         </div>
         <button
           type="button"
@@ -64,10 +64,10 @@ export default function InsightsPage() {
 
 function NoteLine({ note }: { note: Note }) {
   if (!note.text) return null;
-  const who = note.source === "ai" ? `AI note · ${note.model ?? note.provider}` : "Summary";
+  const who = note.source === "ai" ? `AI note (${note.model ?? note.provider})` : "Summary";
   return (
     <p className="m-0 text-[13px] leading-relaxed text-muted">
-      <span className="text-faint">{who} · </span>
+      <span className="text-faint">{who}: </span>
       {note.text}
     </p>
   );
@@ -139,7 +139,7 @@ function Ask({ suggested, online }: { suggested: string[]; online: boolean }) {
         ))}
       </div>
       {!online && !a && !ask.error && (
-        <p className="text-xs text-faint">AI is offline: questions answered earlier still work. Pick a provider in the top bar to ask new ones.</p>
+        <p className="text-xs text-faint">AI offline: cached answers only.</p>
       )}
       {ask.isPending && (
         <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel p-6 text-sm text-muted">
@@ -168,8 +168,9 @@ function Ask({ suggested, online }: { suggested: string[]; online: boolean }) {
               </button>
             )}
             <span className="ml-auto text-xs text-faint">
-              {a.cached ? `Cached answer from ${a.at.replace("T", " ")} · ` : ""}
-              {a.model ?? a.provider} · {fmt(a.seconds, 1)} s
+              {[a.cached ? `Cached ${a.at.replace("T", " ")}` : null, a.model ?? a.provider, `${fmt(a.seconds, 1)} s`]
+                .filter(Boolean)
+                .join(", ")}
             </span>
           </div>
           {showSql && (
@@ -199,7 +200,7 @@ function RockMix({ data, colour, note }: { data: Insights; colour: Record<string
       <div className="flex items-end">
         <div className="flex flex-col gap-1">
           <h2 className="text-[15px] font-semibold">Rock mix by well</h2>
-          <span className="text-xs text-faint">Share of logged feet by rock family · one log per well</span>
+          <span className="text-xs text-faint">Share of logged feet by rock family, one log per well</span>
         </div>
         <button type="button" onClick={() => setTable(!table)} className="ml-auto h-8 text-xs text-muted hover:text-ink">
           {table ? "Show chart" : "Show as table"}
@@ -253,7 +254,7 @@ function RockMix({ data, colour, note }: { data: Insights; colour: Record<string
                       setTip({
                         x: e.clientX - box.left,
                         y: e.clientY - box.top,
-                        text: `${w.well} · ${s.family}: ${pct(s.share, 1)} (${fmt(s.ft)} ft)`,
+                        text: `${w.well}, ${s.family}: ${pct(s.share, 1)} (${fmt(s.ft)} ft)`,
                       });
                     }}
                   />
@@ -372,7 +373,7 @@ function Correlation({
                     setTip({
                       x: e.clientX - box.left,
                       y: e.clientY - box.top,
-                      text: `${l.well} · ${r.family}: ${fmt(r.top)} – ${fmt(r.bottom)} ft`,
+                      text: `${l.well}, ${r.family}: ${fmt(r.top)}–${fmt(r.bottom)} ft`,
                     });
                   }}
                 />

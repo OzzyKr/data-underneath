@@ -13,9 +13,10 @@ export const memory = (mb: number | null | undefined): string =>
 export const seconds = (s: number | null | undefined): string => (s == null ? "–" : `${fmt(s, 1)} s`);
 
 export function logSubtitle(l: Pick<LogSummary, "scale" | "depth_ref" | "kind" | "top_ft" | "bottom_ft">): string {
-  const range = l.top_ft != null && l.bottom_ft != null ? `${fmt(l.top_ft)} – ${fmt(l.bottom_ft)} ft` : null;
+  const range = l.top_ft != null && l.bottom_ft != null ? `${fmt(l.top_ft)}–${fmt(l.bottom_ft)} ft` : null;
   const kind = l.kind === "black and white" ? "black and white" : l.kind === "colour" ? "colour" : null;
-  return [l.scale, l.depth_ref, kind, range].filter(Boolean).join(" · ");
+  const s = [l.scale, l.depth_ref, kind, range].filter(Boolean).join(", ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export function lastLog(): string | null {
