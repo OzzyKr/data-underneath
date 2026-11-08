@@ -5,6 +5,7 @@ import Shell from "./components/Shell";
 import CsvPage from "./pages/CsvPage";
 import ImagePage from "./pages/ImagePage";
 import InsightsPage from "./pages/InsightsPage";
+import LayoutPage from "./pages/LayoutPage";
 
 function Home() {
   const { data } = useLogs();
@@ -23,6 +24,8 @@ export default function App() {
           <Route path="/csv/:logId" element={<CsvPage />} />
           <Route path="/image/:logId" element={<ImagePage />} />
           <Route path="/insights" element={<InsightsPage />} />
+          <Route path="/layout" element={<LayoutPage />} />
+          <Route path="/layout/:docId" element={<LayoutPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

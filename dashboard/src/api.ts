@@ -218,3 +218,86 @@ export const useRun = (id: string | null) =>
     enabled: !!id,
     refetchInterval: (q) => (q.state.data && ["done", "error"].includes(q.state.data.state) ? false : 600),
   });
+
+// ------------------------------------------------------------------ layout (step 1: the box detector)
+
+export type BoxKey = "depth_column" | "interpreted_lithology_column" | "lithology_legend";
+export type BoxMap<T> = Record<BoxKey, T>;
+export type BoxMetric = { page_mean: number; vendor_macro: number; "iou_gt_0.5": number; "iou_lt_0.3": number };
+export type LayoutRow = {
+  doc_id: string;
+  vendor: string;
+  split: string;
+  seconds: number | null;
+  iou: BoxMap<number | null> | null;
+  confidence: BoxMap<number | null> | null;
+};
+export type LayoutUpload = {
+  id: string;
+  name: string;
+  state: "queued" | "running" | "done" | "error";
+  error: string | null;
+  elapsed: number;
+  seconds: number | null;
+  confidence: BoxMap<number> | null;
+};
+export type LayoutSummary = {
+  run: string | null;
+  mean_seconds?: number;
+  max_seconds?: number;
+  metrics: { dev?: { pages: number } & BoxMap<BoxMetric>; holdout?: { pages: number } & BoxMap<BoxMetric> } | null;
+  pages: LayoutRow[];
+  uploads?: LayoutUpload[];
+};
+export type LayoutDetail = LayoutRow & {
+  source: "batch" | "upload";
+  name?: string;
+  size: [number, number] | null;
+  dpi: number | null;
+  body: [number, number] | null;
+  boxes: BoxMap<[number, number, number, number]>;
+  annotated: BoxMap<[number, number, number, number]> | null;
+  notes: string[];
+};
+
+export const useLayout = () => useQuery({ queryKey: ["layout"], queryFn: () => request<LayoutSummary>("/api/layout") });
+export const useLayoutPage = (id?: string) =>
+  useQuery({
+    queryKey: ["layout-page", id],
+    queryFn: () => request<LayoutDetail>(`/api/layout/pages/${encodeURIComponent(id!)}`),
+    enabled: !!id,
+    retry: false,
+  });
+export const layoutCropUrl = (id: string, y0: number, y1: number, w: number) =>
+  `/api/layout/pages/${encodeURIComponent(id)}/crop?y0=${Math.round(y0)}&y1=${Math.round(y1)}&w=${Math.round(w)}`;
+
+/** Upload an image for layout detection (XHR, so large TIFFs report upload progress). Resolves to the job id. */
+export function startDetect(file: File, onProgress?: (pct: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/layout/detect");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(Math.round((100 * e.loaded) / e.total));
+    xhr.onload = () => {
+      let body: { id?: string; detail?: unknown } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* not JSON */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.id) resolve(body.id);
+      else reject(new Error(typeof body.detail === "string" ? body.detail : `upload failed (${xhr.status} ${xhr.statusText})`));
+    };
+    xhr.onerror = () => reject(new Error("upload failed: the dashboard server is not reachable"));
+    xhr.send(fd);
+  });
+}
+
+export const useDetect = (id: string | null) =>
+  useQuery({
+    queryKey: ["detect", id],
+    queryFn: () => request<LayoutUpload>(`/api/layout/detect/${id}`),
+    enabled: !!id,
+    refetchInterval: (q) => (q.state.data && ["done", "error"].includes(q.state.data.state) ? false : 700),
+  });

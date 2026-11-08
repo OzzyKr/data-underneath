@@ -11,12 +11,13 @@ from typing import Any
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from lithology.dash import insights as ins
 from lithology.dash.ai import AIError, Provider, default_provider, make_provider, provider_infos
+from lithology.dash.layout import LayoutView
 from lithology.dash.paths import Paths
 from lithology.dash.store import Source, ingest, read_summary
 
@@ -117,10 +118,13 @@ def create_app(paths: Paths | None = None) -> FastAPI:
         st.jobs = Jobs(paths, st.ingest_live)
         yield
         st.jobs.shutdown()
+        app.state.layout.shutdown()
         st.con.close()
 
     app = FastAPI(title="Data Underneath", lifespan=lifespan)
     app.state.st = State(paths)
+    build_meta = json.loads(paths.build_meta.read_text()) if paths.build_meta.exists() else {}
+    app.state.layout = LayoutView(paths, include_holdout=bool(build_meta.get("include_holdout")))
 
     def st() -> State:
         return app.state.st
@@ -263,6 +267,44 @@ def create_app(paths: Paths | None = None) -> FastAPI:
         if s is None:
             raise HTTPException(404, "no such run")
         return s
+
+    # ---------------------------------------------------------------- layout (step 1: the box detector)
+
+    def lay() -> LayoutView:
+        return app.state.layout
+
+    @app.get("/api/layout")
+    def layout_summary() -> dict[str, Any]:
+        return lay().summary()
+
+    @app.get("/api/layout/pages/{doc_id}")
+    def layout_page(doc_id: str) -> dict[str, Any]:
+        d = lay().detail(doc_id)
+        if d is None:
+            raise HTTPException(404, "no such page (or its detection is still running)")
+        return d
+
+    @app.get("/api/layout/pages/{doc_id}/crop")
+    def layout_crop(doc_id: str, y0: int, y1: int, w: int = 1400) -> Response:
+        png = lay().crop_png(doc_id, y0, y1, w)
+        if png is None:
+            raise HTTPException(404, "no such page")
+        return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
+
+    @app.post("/api/layout/detect")
+    async def layout_detect(file: UploadFile) -> dict[str, Any]:
+        try:
+            job_id = lay().submit(file.filename or "upload", await file.read())
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": job_id}
+
+    @app.get("/api/layout/detect/{job_id}")
+    def layout_job(job_id: str) -> dict[str, Any]:
+        j = lay().job(job_id)
+        if j is None:
+            raise HTTPException(404, "no such detection")
+        return j
 
     # ---------------------------------------------------------------- static
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
-import { ChartLine, Image as ImageIcon, Table2, Upload } from "lucide-react";
+import { ChartLine, Image as ImageIcon, ScanSearch, Table2, Upload } from "lucide-react";
 import { useLogs, useMeta } from "../api";
 import { lastLog } from "../format";
 import LogPicker from "./LogPicker";
@@ -30,6 +30,7 @@ export default function Shell() {
   const [drawer, setDrawer] = useState(false);
   const current = logId ?? lastLog() ?? logs?.[0]?.log_id ?? "";
   const onInsights = pathname.startsWith("/insights");
+  const onLayout = pathname.startsWith("/layout");
 
   return (
     <div className="flex min-h-full flex-wrap bg-bg">
@@ -51,6 +52,10 @@ export default function Shell() {
             <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />
             Insights
           </NavLink>
+          <NavLink to="/layout" className={navClass}>
+            <ScanSearch size={16} strokeWidth={1.75} aria-hidden="true" />
+            Layout
+          </NavLink>
         </div>
         <p className="mt-auto px-3 text-xs leading-relaxed text-faint">
           {meta ? `${meta.logs} logs` : ""}
@@ -60,7 +65,13 @@ export default function Shell() {
 
       <div className="flex min-w-0 shrink grow-[999] basis-[560px] flex-col">
         <header className="flex flex-wrap items-center gap-3 border-b border-line px-6 py-4 lg:px-12">
-          {onInsights ? <span className="text-sm text-muted">All logs</span> : <LogPicker current={logId} />}
+          {onLayout ? (
+            <span className="text-sm text-muted">Layout detector · step 1</span>
+          ) : onInsights ? (
+            <span className="text-sm text-muted">All logs</span>
+          ) : (
+            <LogPicker current={logId} />
+          )}
           <div className="ml-auto flex flex-wrap items-center gap-2.5">
             {onInsights && <ProviderSwitch />}
             <button
