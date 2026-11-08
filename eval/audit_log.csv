@@ -14,3 +14,4 @@ timestamp,commit,config_hash,pred,note,n,correct,accuracy,flagged,confident_wron
 2026-11-07T21:53:01,fda5663-dirty,d33ac173a4ce,fix12_all,trial: colour veto + bed-level exact match,98,85,0.8673,23,3
 2026-11-07T21:53:20,fda5663-dirty,d33ac173a4ce,out,previous run (edge snap) rescored on 98-label audit,98,85,0.8673,24,3
 2026-11-07T21:58:44,fda5663-dirty,d33ac173a4ce,out,colour veto (paper/text boxes dropped; colour-clashing names flagged),98,85,0.8673,24,3
+2026-11-08T03:10:02,3c2e53e-dirty,398d414bc8a9,out,,98,88,0.898,22,4

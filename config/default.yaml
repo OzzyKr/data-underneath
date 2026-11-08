@@ -81,7 +81,8 @@ ai:
   provider: none             # none | openai | gemini (tier 3 only)
 
 layout:                      # STEP 1 of the pipeline: find the depth column, lithology column and legend on the page
-  source: detect             # detect: always detect the boxes (annotation files, if any, are only used to report IoU)
+  source: auto               # auto: use the annotation file when there is one, detect the boxes when there is not;
+                             # detect: always detect (bonus / end-to-end evaluation); annotation: same as auto
                              # annotation: use the organisers' boxes when a file exists, detect otherwise (A/B only)
   body_samples: 3000         # rows sampled down the page to find where the long track rules run
   body_gap_in: 0.15          # breaks in the track rules shorter than this are bridged (wider merges the header table)

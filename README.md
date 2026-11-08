@@ -14,8 +14,11 @@ brew install tesseract                 # OCR engine (Linux: apt-get install tess
 conda env create -f environment.yml    # Python 3.12 env named "lithology"
 conda activate lithology
 
+lith fetch-weights                     # once, online: cache the tier-2 model weights (runs are offline after this)
 lith check-data                        # audit dataset/, write data/manifest.json
 lith run dataset/images --out out      # CSV + annotated PNG per log, plus run_summary.csv
+                                       #   boxes: the annotation JSON when there is one, detected when there is not
+                                       #   --detect-boxes: always detect (bonus); --tier 1: classical naming only
 lith eval --pred out --labels labels   # score against hand labels (dev split), append to eval/results_log.csv
 lith audit --pred out                  # score naming against eye-audit spot labels (labels/audit)
 make check                             # lint + tests

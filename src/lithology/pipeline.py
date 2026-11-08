@@ -122,13 +122,14 @@ def process(
 
 
 def _layout_step(doc: Document, img, cfg: Config, boxes: DocumentBoxes | None) -> tuple[DocumentBoxes, dict]:
-    """Step 1. Boxes passed in by the caller win; ``layout.source: annotation`` uses the organisers' file when it
-    exists (A/B comparison only); otherwise the detector finds the boxes. An annotation, when present, is only used
-    to record how well the detected boxes match it."""
+    """Step 1. Boxes passed in by the caller win. ``layout.source``: ``auto`` (default) uses the organisers' annotation
+    file when the document has one and detects the boxes only when it has none; ``annotation`` is the same; ``detect``
+    always detects (the bonus, and for end-to-end evaluation of the detector). When an annotation exists it is also
+    used to record how well detected boxes match it."""
     if boxes is not None:
         return boxes, {"source": "supplied"}
     ann = doc.annotation()
-    if cfg.layout.source == "annotation" and ann is not None:
+    if cfg.layout.source in ("auto", "annotation") and ann is not None:
         return ann.boxes, {"source": "annotation"}
     from lithology.layout import detect_boxes
 

@@ -42,7 +42,8 @@ def test_detects_three_boxes_on_synthetic_logs(kw, cfg):
 
 
 @needs_tesseract
-def test_pipeline_step1_detects_and_reports_iou(synth_dataset, cfg):
+def test_pipeline_step1_detects_and_reports_iou(synth_dataset):
+    cfg = load_config(overrides={"layout": {"source": "detect"}})
     doc = discover(synth_dataset / "images").documents[0]
     res = process(doc, cfg)
     assert res.ok, res.error
@@ -62,7 +63,25 @@ def test_pipeline_can_use_annotation_for_ab_comparison(synth_dataset, synth_doc)
 
 def test_layout_source_must_be_known():
     cfg = load_config()
-    assert cfg.layout.source in ("detect", "annotation")
+    assert cfg.layout.source in ("auto", "detect", "annotation")
+
+
+@needs_tesseract
+def test_default_uses_the_annotation_and_detects_only_without_one(synth_dataset, synth_doc, tmp_path):
+    """The main task must never depend on the detector when the organisers' boxes exist."""
+    import shutil
+
+    cfg = load_config()
+    assert cfg.layout.source == "auto"
+    doc = discover(synth_dataset / "images").documents[0]
+    res = process(doc, cfg)
+    assert res.ok and res.layout["source"] == "annotation"
+    assert res.boxes == DocumentBoxes.from_dict(synth_doc.annotation["bounding_boxes"])
+    lone = tmp_path / "no_annotation" / "images"  # the same image with no annotation file next to it
+    lone.mkdir(parents=True)
+    shutil.copy(doc.image_path, lone / doc.image_path.name)
+    res2 = process(discover(lone).documents[0], cfg)
+    assert res2.ok and res2.layout["source"] == "detected"
 
 
 def _with_cuttings_track(doc):

@@ -31,7 +31,7 @@ def test_full_pipeline_on_synthetic_log(synth_dataset, synth_doc, cfg):
 @needs_tesseract
 def test_cli_run_writes_outputs(synth_dataset, tmp_path):
     out = tmp_path / "out"
-    code = main(["run", str(synth_dataset / "images"), "--out", str(out), "--workers", "1"])
+    code = main(["run", str(synth_dataset / "images"), "--out", str(out), "--workers", "1", "--tier", "1"])
     assert code == 0
     assert (out / "synthetic_5in_md.csv").exists()
     assert (out / "synthetic_5in_md.png").exists()

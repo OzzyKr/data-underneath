@@ -18,6 +18,32 @@ INPUT_PX = 160  # every patch is resized to this square before the network
 LAYER = 3  # mid-level features: texture-sensitive, less tied to ImageNet object classes
 
 
+def _weights_file() -> Path:
+    import torchvision
+
+    url = torchvision.models.ResNet18_Weights.IMAGENET1K_V1.url
+    return CACHE / "hub" / "checkpoints" / url.rsplit("/", 1)[-1]
+
+
+def availability() -> str | None:
+    """None when the second opinion can run offline; otherwise why not (missing packages or uncached weights)."""
+    try:
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+    except ImportError as e:
+        return f"{e.name} is not installed"
+    if not _weights_file().exists():
+        return f"weights are not cached in {CACHE} (run `lith fetch-weights` once, online)"
+    return None
+
+
+def fetch_weights() -> Path:
+    """Download the ResNet-18 weights into the repo cache (the only online step; runs are offline afterwards)."""
+    _model.cache_clear()
+    _model()
+    return _weights_file()
+
+
 @lru_cache(maxsize=1)
 def _model():
     os.environ.setdefault("TORCH_HOME", str(CACHE))

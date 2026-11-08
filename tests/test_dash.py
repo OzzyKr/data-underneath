@@ -80,7 +80,7 @@ def dash_repo(tmp_path_factory, synth_doc, cfg):
     anns.mkdir(parents=True)
     synth_doc.image.save(images / f"{DOC}.tif", compression="tiff_lzw", dpi=(200, 200))
     (anns / f"{DOC}.json").write_text(json.dumps(synth_doc.annotation))
-    assert main(["run", str(images), "--out", str(repo / "out"), "--workers", "1", "--no-images"]) == 0
+    assert main(["run", str(images), "--out", str(repo / "out"), "--workers", "1", "--no-images", "--tier", "1"]) == 0
     build(Paths(repo), workers=1)
     return repo
 

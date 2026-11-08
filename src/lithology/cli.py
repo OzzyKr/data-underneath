@@ -194,17 +194,53 @@ def run_batch(
     return [rows[i] for i in range(len(jobs))]
 
 
+def tier2_problem(cfg) -> str | None:
+    """Why the configured tier-2 second opinion cannot run (None when it can). Naming accuracy drops without it,
+    so a run refuses to start instead of silently degrading."""
+    if cfg.ai.tier < 2:
+        return None
+    from lithology.ai.embed import availability
+
+    reason = availability()
+    if reason is None:
+        return None
+    return (
+        f"tier-2 naming model unavailable: {reason}. Install it (`pip install -e '.[ai]'` then `lith fetch-weights`) "
+        "or run classical-only on purpose with `--tier 1`"
+    )
+
+
+def cmd_fetch_weights(a: argparse.Namespace) -> int:
+    from lithology.ai.embed import availability, fetch_weights
+
+    fetch_weights()
+    reason = availability()
+    if reason:
+        log.error("weights still unavailable: %s", reason)
+        return 1
+    log.info("tier-2 weights cached; runs are offline from now on")
+    return 0
+
+
 def cmd_run(a: argparse.Namespace) -> int:
-    if getattr(
-        a, "use_annotations", False
-    ):  # workers load the config from a path: write the override beside the output
+    overrides: dict = {}
+    if a.detect_boxes:  # ignore the annotation files: the boxes come from the detector (bonus)
+        overrides.setdefault("layout", {})["source"] = "detect"
+    if a.tier is not None:
+        overrides.setdefault("ai", {})["tier"] = a.tier
+    if overrides:  # workers load the config from a path: write the override beside the output
         base = (yaml.safe_load(Path(a.config).read_text()) if a.config else {}) or {}
-        base.setdefault("layout", {})["source"] = "annotation"
+        for section, vals in overrides.items():
+            base.setdefault(section, {}).update(vals)
         Path(a.out).mkdir(parents=True, exist_ok=True)
-        forced = Path(a.out) / "_config_use_annotations.yaml"
+        forced = Path(a.out) / "_config_run_overrides.yaml"
         forced.write_text(yaml.safe_dump(base))
         a.config = str(forced)
     cfg = load_config(Path(a.config) if a.config else None)
+    problem = tier2_problem(cfg)
+    if problem:
+        log.error("%s", problem)
+        return 2
     docs = _docs_from(a.inputs)
     if not docs:
         log.error("no documents found in %s", a.inputs)
@@ -715,9 +751,20 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument(
         "--detect-boxes",
         action="store_true",
-        help="ignore annotation files and detect the three boxes (bonus; for end-to-end evaluation)",
+        help="ignore annotation files and detect the three boxes (bonus; for end-to-end evaluation). "
+        "Without it the annotation file is used when there is one and the boxes are detected when there is not",
+    )
+    r.add_argument(
+        "--tier",
+        type=int,
+        choices=(1, 2),
+        help="1 = classical naming only; 2 = + local pretrained second opinion (default from config; needs torch "
+        "and cached weights: `lith fetch-weights`)",
     )
     r.set_defaults(fn=cmd_run)
+
+    fw = sub.add_parser("fetch-weights", help="download the tier-2 model weights once, so later runs stay offline")
+    fw.set_defaults(fn=cmd_fetch_weights)
 
     lo = sub.add_parser("layout", help="bonus: detect the three boxes without annotations, score against them")
     lo.add_argument("inputs", nargs="+", help="image files or folders")
