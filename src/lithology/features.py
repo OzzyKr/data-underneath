@@ -1,17 +1,14 @@
 """Pattern descriptors shared by segmentation, clustering and legend matching.
 
-A lithology fill is a background colour plus a repeated ink pattern (dots, dashes, bricks, hatching). The
-descriptor captures both with cheap, explainable statistics:
+A lithology fill is a background colour plus a repeated ink pattern. The descriptor captures both:
 
   fill colour (Lab)   mean colour of non-ink pixels
   ink colour (Lab)    mean colour of ink pixels
-  ink fraction        how much of the area is ink
+  ink fraction        share of the area that is ink
   h / v / d adjacency share of ink pixels whose right / lower / diagonal neighbour is also ink
-                      (horizontal dashes -> high h, vertical dashes -> high v, dots -> low everything)
-  row / col spread    variation of ink between rows / columns (ruled patterns vs uniform stipple)
+  row / col spread    variation of ink between rows / columns
 
-Everything is computed per pixel row first and then summed over blocks, so a 300,000-row column costs a few
-vectorised passes rather than a Python loop per block.
+Statistics are computed per row and summed over blocks, so long columns cost a few vectorised passes.
 """
 
 from __future__ import annotations
@@ -42,11 +39,7 @@ TEXTURE_IDX = np.array([6, 7, 8, 9, 10, 11])
 
 @dataclass
 class RowStats:
-    """Prefix sums over the rows of an (H, W, 3) crop.
-
-    Any row range [a, b) is summarised in O(1) per statistic (``P[b] - P[a]``), so descriptors for thousands of
-    candidate ranges (block grids, boundary refinement) cost nothing extra on 300k-row columns.
-    """
+    """Prefix sums over the rows of an (H, W, 3) crop: any row range is summarised in O(1) per statistic."""
 
     width: int
     n_rows: int
@@ -175,17 +168,15 @@ MATCH_NAMES: tuple[str, ...] = (
     "skel_v",
     "skel_d",
 )
-# Fixed scales for column-vs-legend matching: column and legend share their background colour exactly, so
-# 4 Lab units of background difference already counts as much as a large texture difference; texture terms are
-# fractions. Fixed (not learned) so the matcher has nothing to overfit.
+# Fixed (not learned) scales for column-vs-legend matching: column and legend share their fill colour exactly,
+# so 4 Lab units of fill difference weigh as much as a large texture difference.
 MATCH_SCALE = np.array([4, 4, 4, 15, 15, 15, 0.02, 0.15, 0.15, 0.15])
 
 
 def match_descriptor(rgb: np.ndarray, ink_luma: int) -> np.ndarray:
-    """Descriptor for comparing a column patch with a legend swatch drawn at a different stroke width.
+    """Descriptor for matching a column patch to a legend swatch drawn at a different stroke width.
 
-    Texture is measured on the skeleton (strokes thinned to 1 px), so thick and thin renderings of the same
-    pattern agree: horizontal dashes give a high skel_h, vertical bars a high skel_v, dots neither.
+    Texture is measured on the 1 px skeleton, so thick and thin renderings of a pattern agree.
     """
     from skimage.morphology import skeletonize
 
@@ -233,10 +224,8 @@ DEFAULT_FLOOR = np.array([2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 0.01, 0.03, 0.03, 0.03, 
 
 
 # ------------------------------------------------------------------------------- stroke-shape descriptor
-# Ported from a teammate's prototype (depth-pipeline branch, src/match.py, J. Ouazzani). A pattern is described by
-# the *shapes* of its marks, not their size or spacing: the share of dashes (wide marks), vertical bars and dots among
-# its connected ink components, its anisotropy, ink density and long horizontal rules, plus the fill colour. A column
-# that draws the legend's pattern denser or smaller (common on black-and-white logs) keeps the same description.
+# Stroke-shape descriptor, after J. Ouazzani's prototype: a pattern is described by the shapes of its marks
+# (dashes, bars, dots, anisotropy, density, long rules) plus fill colour, so denser or smaller drawings still match.
 
 STROKE_WEIGHTS = np.array([0.5, 2.0, 2.0, 2.0, 0.2, 1.0])  # anisotropy, dash, dot, vertical, log ink, long rules
 STROKE_COLOUR_WEIGHT = 6.0  # fill colour (0-1 RGB) difference counts this much

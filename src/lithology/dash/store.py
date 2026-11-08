@@ -94,7 +94,7 @@ def _find_image(images: Path, doc_id: str) -> Path | None:
 
 def live_source(paths: Paths, doc_id: str, rec: dict[str, Any], layout_run: Path | None = None) -> Source:
     """A live run from its ``out_live/sources.json`` record."""
-    # records written before the layout step have no boxes_source: their "ann" is the uploaded (or dataset) box file
+    # older records have no boxes_source; their "ann" is the uploaded (or dataset) box file
     uploaded = rec.get("uploaded_ann") if "boxes_source" in rec else rec.get("ann")
     return Source(
         doc_id,
@@ -184,7 +184,7 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
     bottom = pd.to_numeric(df["bottom_depth"], errors="coerce")
     thick = (bottom - top).where(lambda s: s > 0)
     rock = df["lithology"].map(display_name)
-    # status column (pipeline >= 2026-11-07): named | similar | unresolved; older outputs only have the notes
+    # status column: named | similar | unresolved; older outputs only have the notes
     if "status" in df:
         status = df["status"].fillna("named").astype(str)
         similar = status == "similar"
@@ -320,8 +320,7 @@ def _layout_diag(src: Source) -> dict[str, Any]:
 
 
 def used_boxes(src: Source) -> tuple[dict | None, tuple[int, int] | None]:
-    """The boxes the run actually used and the image size: the layout detector's (diagnostics) when it found them,
-    else the box file's."""
+    """The boxes the run used and the image size: detected boxes from diagnostics, else the box file's."""
     lay = _layout_diag(src)
     if lay.get("source") == "detected" and lay.get("boxes") and src.image_path and src.image_path.exists():
         with Image.open(src.image_path) as im:
@@ -333,8 +332,7 @@ def used_boxes(src: Source) -> tuple[dict | None, tuple[int, int] | None]:
 
 
 def _boxes_source(src: Source) -> str:
-    """Where the run's boxes came from: "detector" (the layout detector) or "json" (a box file; also every run from
-    before the layout step)."""
+    """Where the run's boxes came from: "detector" or "json" (box file, including runs before the layout step)."""
     return "detector" if _layout_diag(src).get("source") == "detected" else "json"
 
 
@@ -348,8 +346,7 @@ def annotated_boxes(src: Source) -> dict | None:
 
 
 def detected_boxes(src: Source) -> dict | None:
-    """The layout detector's boxes: from the run itself when it detected them, else from the newest `lith layout`
-    run (dataset scans), if any."""
+    """The detector's boxes: from the run when it detected them, else from the newest ``lith layout`` run."""
     lay = _layout_diag(src)
     if lay.get("source") == "detected" and lay.get("boxes"):
         return lay["boxes"]

@@ -66,13 +66,10 @@ def _refine(
 
 
 def snap_to_gap(stats: RowStats, scaler: FeatureScaler, row: int, radius: int, w: int) -> int:
-    """Put a pattern boundary in the blank gap between two patterns' marks, not on a row of marks.
+    """Move a pattern boundary into the blank gap between two patterns' marks.
 
-    Drawn patterns change between the last mark of one bed and the first mark of the next, so the boundary is in
-    the ink-free gap between them. Refinement on ~1 ft windows can land on a mark row instead (half a pattern
-    period off, ~0.7 ft on the example log). Only same-fill boundaries move: a fill-colour change is sharp and
-    already placed exactly. Among the gaps within ``radius``, the one whose centre best separates the windows
-    above and below wins (same score as ``_refine``).
+    Only same-fill boundaries move (colour changes are already sharp). Among the gaps within ``radius``, the one
+    that best separates the windows above and below wins.
     """
     lo, hi = max(w, row - radius), min(stats.n_rows - w, row + radius)
     if hi <= lo or row - w < 0 or row + w > stats.n_rows:  # too close to the column's ends to compare
@@ -143,8 +140,7 @@ def _change_points(X: np.ndarray, min_size: int, penalty: float) -> list[int]:
 def _drop_slivers(stats: RowStats, fscaler: FeatureScaler, rows: list[int], sliver_px: int) -> list[int]:
     """Keep a bed thinner than ``sliver_px`` only when it interrupts one rock (A-b-A).
 
-    Real thin beds interbed: the rock above and below is the same and the thin bed differs from both. A sliver
-    between two different rocks is a transition artefact where two patterns meet, so it joins the closer side.
+    Other slivers are transition artefacts where two patterns meet and join the closer side.
     """
     rows = list(rows)
     changed = True
@@ -183,9 +179,7 @@ def _dedupe(boundaries: list[int], h: int, min_gap: int) -> list[int]:
 def _ignore_thin_lines(fill: np.ndarray, ink_frac: np.ndarray, max_blocks: int) -> np.ndarray:
     """Background colour per block, with ruled lines removed.
 
-    A block that is (almost) all ink has no background, so its "fill" falls back to the ink colour. For a run of
-    such blocks thinner than a bed (a printed line) that would fake a colour change, so the run takes the colour
-    of the block before it. Longer all-ink runs are real dark beds (coal, solid fills) and are kept.
+    Short runs of all-ink blocks (printed lines) take the colour of the block before; longer runs are dark beds.
     """
     out = fill.copy()
     solid = ink_frac >= 0.9
@@ -206,14 +200,10 @@ def _ignore_thin_lines(fill: np.ndarray, ink_frac: np.ndarray, max_blocks: int) 
 
 
 def segment_column(rgb: np.ndarray, px_per_ft: float, cfg: SegmentConfig) -> Segmentation:
-    """Segment a column crop (H, W, 3). Rows in the result are relative to the crop.
+    """Segment a column crop (H, W, 3); rows in the result are relative to the crop.
 
-    Two passes, merged:
-      coarse - colour + pattern on ~1 ft blocks: pattern statistics need blocks longer than the pattern's repeat,
-               so this pass finds beds of ``min_thickness_ft`` and more, in colour and black-and-white logs alike.
-      fine   - background (fill) colour only, on small blocks: fill colour is stable at any block size, so thin
-               beds (down to ``colour_min_thickness_ft``) are found in colour logs. In black-and-white logs the
-               fill never changes, so this pass adds nothing and cannot add noise.
+    Two passes, merged: colour + pattern on ~1 ft blocks (beds of ``min_thickness_ft`` and more), and fill colour
+    only on small blocks (thin beds in colour logs; inert on black-and-white logs).
     """
     stats = row_stats(rgb, cfg.ink_luma)
     h = stats.n_rows

@@ -1,14 +1,8 @@
-"""Name each group of intervals from the legend, or say honestly that it cannot be told apart.
+"""Name each group of beds from the legend.
 
-Two independent opinions rank the legend swatches for each group:
-  classical  - fixed-scale colour + stroke-skeleton descriptor distance (always on)
-  pretrained - frozen ResNet-18 feature similarity (tier 2, optional)
-
-Decision rule (explainable, no learned weights):
-  both agree on the best swatch                        -> named, high confidence
-  they disagree, exactly one has a decisive margin     -> that one's choice, medium confidence
-  otherwise (both unsure, or both sure but different)  -> unresolved: "computer vision could not differentiate"
-With only the classical opinion, a group is named when its margin is decisive and unresolved otherwise.
+Independent opinions rank the legend swatches per group: a two-way pixel template match, a colour and
+stroke-skeleton distance, and optionally frozen ResNet-18 features. Agreement or one decisive opinion names the
+group; otherwise best_guess picks a flagged name.
 """
 
 from __future__ import annotations
@@ -55,16 +49,10 @@ def template_similarity(
     min_detail: float = 12.0,
     colour_gate: float = 12.0,
 ) -> np.ndarray:
-    """Pixel template match (clusters x swatches), both ways: is the column piece in the swatch, and the swatch in
-    the column piece? The score is the weaker of the two.
+    """Two-way pixel template match (clusters x swatches): the weaker of piece-in-swatch and swatch-in-piece.
 
-    When a log draws its column and legend with the same software, a column piece is pixel-identical to its
-    swatch (score ~1.0). Matching both ways matters when one swatch is another plus extra marks ("Sandy clay-shale"
-    = "Clay-shale" + dots): a plain column is found inside both swatches, but only the plain swatch is found in the
-    column. Each swatch is matched at its own size (one tiny swatch must not shrink every comparison). Pieces
-    without real pattern detail (flat colour, std < ``min_detail``) say nothing and are skipped, so thin flat slivers
-    cannot produce false perfect scores. Correlation ignores average colour, so a swatch whose background colour
-    differs by more than ``colour_gate`` (Lab) scores 0. NaN = no usable piece.
+    Matching both ways separates a plain swatch from a variant with extra marks. Flat pieces are skipped, swatches
+    whose fill differs by more than ``colour_gate`` (Lab) score 0, and NaN means no usable piece.
     """
     import cv2
 
@@ -112,17 +100,18 @@ def template_similarity(
 def decide(
     distance: np.ndarray, similarity: np.ndarray | None, cfg: NamingConfig, template: np.ndarray | None = None
 ) -> Naming:
-    """Decide one group. ``distance``: classical distance per swatch (lower = closer).
-    ``similarity``: pretrained cosine similarity per swatch (higher = closer), or None when tier 2 is off.
-    ``template``: pixel template scores per swatch (NaN = no opinion); a near-exact match is decisive on its own."""
+    """Decide one group.
+
+    ``distance``: classical distance per swatch (lower is closer). ``similarity``: pretrained cosine similarity
+    (higher is closer), or None. ``template``: template scores (NaN = no opinion), decisive when near-exact.
+    """
     if template is not None and np.isfinite(template).any():
         template = np.nan_to_num(template, nan=-1.0)  # swatches it could not compare have no say
         t, t2, t_margin = _top2(template, higher_is_better=True)
         if template[t] >= cfg.template_min_score:
             if t_margin >= cfg.template_decisive_margin:
                 return Naming(t, cfg.confidence_agree, [t, t2], "column is pixel-identical to this legend swatch")
-            # Pixel-identical to several swatches: the marks that tell them apart are not in the column, so the
-            # statistical opinions (looking at the same pixels) cannot settle it either.
+            # pixel-identical to several swatches: the telling marks are missing, so no opinion can settle it
             tied = [int(i) for i in np.argsort(-template) if template[i] >= template[t] - cfg.template_decisive_margin]
             return Naming(None, cfg.confidence_unresolved, tied, "column matches several swatches equally")
     a, a2, a_margin = _top2(distance, higher_is_better=False)
@@ -149,9 +138,10 @@ def decide(
 def classify_flagged(
     pick: int, candidates: list[int], swatch_fill: np.ndarray, bed_matches_pick: bool, colour_gate: float
 ) -> tuple[str, list[int]]:
-    """A flagged group is 'similar' when vision narrowed it to 2-3 look-alike legend entries: candidates with the best
-    guess's fill colour (Lab distance <= ``colour_gate``), the bed itself having that colour. Otherwise it is
-    'unresolved': no entry matches clearly, or the candidates do not even look alike. Returns (status, entries)."""
+    """Flag a group as 'similar' (2-3 look-alike entries with the bed's fill colour) or 'unresolved'.
+
+    Returns (status, entries).
+    """
     cands = list(dict.fromkeys([pick, *candidates]))
     alike = [i for i in cands if np.linalg.norm(swatch_fill[i] - swatch_fill[pick]) <= colour_gate][:3]
     if bed_matches_pick and len(alike) >= 2:
@@ -168,14 +158,10 @@ def unresolved_note(candidates: list[str]) -> str:
 
 
 # ------------------------------------------------------------------------------------------ best guess
-# When no opinion is decisive, the CSV still gets a name (naming.abstain: false), flagged with a low confidence and
-# the "could not differentiate" note. The guess is chosen in three explainable steps:
-#   1. rank aggregation: every opinion ranks all swatches; ranks are summed (the pixel template counts double when it
-#      has a real opinion, as it compares actual pixels), best total wins;
-#   2. look-alike variants: if the leading candidates are one rock with different modifiers ("Clay-shale" /
-#      "Sandy clay-shale", "Sand" / "Sandstone", "Limestone" / "Dolomitic limestone"), write the plainest entry;
-#   3. identical swatches: if the legend draws the winner and another entry pixel-identically (b&w "Clay" and
-#      "Shale"), the picture cannot decide: write the plainer, then the more common rock (naming.common_rocks).
+# When no opinion is decisive the CSV still gets a flagged name, chosen in three steps:
+#   1. rank aggregation over all opinions (the pixel template counts double when it has an opinion);
+#   2. variants of one rock ("Clay-shale" / "Sandy clay-shale"): write the plainest entry;
+#   3. pixel-identical swatches (b&w "Clay" and "Shale"): write the more common rock.
 
 # A rock word stands for its base rock; "sand" and "sandstone" are the same rock for this purpose.
 _SAME_ROCK = {"sand": "sandstone", "silt": "siltstone", "clay": "claystone", "dolostone": "dolomite", "salt": "halite"}
@@ -245,10 +231,9 @@ def best_guess(
     strokes: np.ndarray | None = None,
     colour_ok: np.ndarray | None = None,
 ) -> tuple[int, float, str, bool]:
-    """(swatch index, confidence, reason, still flagged) for a group no single opinion settled. See notes above.
+    """(swatch index, confidence, reason, still flagged) for a group no single opinion settled.
 
-    ``colour_ok``: swatches whose fill colour matches the group's; when any does, only those can be the guess
-    (colour is the most reliable cue on colour logs, and the pretrained model is nearly colour-blind).
+    When any swatch matches the group's fill colour (``colour_ok``), only those can be the guess.
     """
     agg = aggregate_rank(distance, similarity, template, strokes)
     pool = set(candidates)

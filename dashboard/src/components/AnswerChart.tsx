@@ -2,7 +2,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import type { Answer } from "../api";
 import { fmt } from "../format";
 
-// Validated categorical slots, in order (dataviz check on the dark surface). One series -> slot 1.
+// Categorical colour slots, in order. A single series uses the first.
 const SERIES = ["#3987E5", "#D95926", "#199E70", "#C98500"];
 const AXIS = { fill: "#A3ACB6", fontSize: 11 };
 

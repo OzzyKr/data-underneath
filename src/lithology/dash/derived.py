@@ -1,14 +1,11 @@
 """Well-level tables derived from the per-log intervals, for questions about wells and salt.
 
-The raw ``intervals`` table is one row per bed per log, and one well can have several logs (scales, MD/TVD versions,
-sidetracks). Questions such as "where does the salt end?" are easy to get wrong on raw beds: a 4 ft salt stringer
-far below the salt body becomes "the base", a well is counted once per log, and a log that starts inside the salt
-makes its first row look like the top of salt. These tables settle those choices once, in code:
+Raw beds make salt questions easy to get wrong (a thin stringer below the body read as its base, a well counted
+once per log), so these tables settle those choices once:
 
-wells  one row per well:  names, logs, depth range.
-salt   one row per log that crosses a salt body (``main_log`` marks one log per well): the main body (top, base,
-       thickness), whether its top is really seen on the log, the mixed salt/sediment zone just below the base,
-       and the sand below the salt.
+wells  one row per well: names, logs, depth range.
+salt   one row per log crossing a salt body (``main_log`` marks one per well): body top, base and thickness,
+       whether the top is seen, the mixed zone below the base, and the sand below the salt.
 """
 
 from __future__ import annotations

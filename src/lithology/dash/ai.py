@@ -1,4 +1,4 @@
-"""AI providers behind one switch, so the Insights page works with whichever API key the team has.
+"""AI providers behind one switch, used by the Insights page.
 
 Set in ``.env`` (repo root) or the environment:
 
@@ -6,8 +6,7 @@ Set in ``.env`` (repo root) or the environment:
     ANTHROPIC_API_KEY=...   ANTHROPIC_MODEL=claude-opus-5-5   AI_EFFORT=medium
     OPENAI_API_KEY=...      OPENAI_MODEL=<model>   OPENAI_BASE_URL=<any OpenAI-compatible endpoint>
 
-``openai`` covers every OpenAI-compatible endpoint (OpenAI, Azure, Gemini, Groq, Mistral, a local Ollama ...).
-``none`` runs offline: insight notes and answers come from the cache of earlier runs.
+``openai`` covers any OpenAI-compatible endpoint. ``none`` runs offline from the cache of earlier answers.
 The provider can also be switched at runtime from the dashboard's top bar.
 """
 

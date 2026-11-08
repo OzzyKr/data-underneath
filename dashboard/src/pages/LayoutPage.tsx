@@ -150,7 +150,7 @@ export default function LayoutPage() {
               <span className="text-rose">{uploadErr}</span>
             ) : null}
           </span>
-          {/* a real <label> for the file input: opens the picker natively in every browser */}
+          {/* a <label> opens the file picker natively */}
           <label
             aria-disabled={busy}
             className={`flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-line-2 px-3.5 text-sm text-ink transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-select hover:bg-hover ${

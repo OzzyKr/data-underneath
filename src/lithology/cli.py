@@ -1,4 +1,4 @@
-"""Command-line entry point: ``lith run | eval | check-data``."""
+"""Command-line entry point (``lith --help`` lists the commands)."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
     }
 
 
-# Measured 2026-11-07 on all 51 logs: peak memory <= decoded image + ~1.8 GB (OCR, pretrained model, crops).
+# peak memory is at most the decoded image plus ~1.8 GB (OCR, pretrained model, crops)
 _BASE_MB = 1800.0
 
 
@@ -132,9 +132,8 @@ def run_batch(
 ) -> list[dict]:
     """Run documents in worker processes; a worker that dies (e.g. out of memory) never stops the batch.
 
-    Jobs are started largest first, and only while the estimated peak memory of the running ones fits the budget
-    (a job larger than the whole budget runs alone). A dead worker breaks the whole pool, so every job running at
-    that moment is retried later, one at a time; a job that kills its worker even when alone is reported as an error.
+    Jobs start largest first while their estimated peak memory fits the budget. Jobs lost with a dead pool are
+    retried one at a time; a job that kills its worker alone is reported as an error.
     """
     fn = fn or _run_one
     queue = deque(sorted(range(len(jobs)), key=lambda i: -est_mb[i]))
@@ -330,7 +329,7 @@ def cmd_eval(a: argparse.Namespace) -> int:
 
 
 def cmd_audit(a: argparse.Namespace) -> int:
-    """Score a run against the eye-audit spot labels (labels/audit) and append the result to eval/audit_log.csv."""
+    """Score a run against the spot labels in labels/audit and append the result to eval/audit_log.csv."""
     from lithology.evaluate import AuditScore, score_audit
 
     pred_dir, audit_dir = Path(a.pred), Path(a.audit)
@@ -476,7 +475,7 @@ def cmd_labels_make(a: argparse.Namespace) -> int:
     for s in sel:
         if only and s["key"] not in only:
             if s["key"] in existing:
-                items.append(existing[s["key"]])  # untouched: keep the person's files and window
+                items.append(existing[s["key"]])  # untouched: keep the edited files and window
             continue
         doc = next((d for d in docs if d.doc_id.startswith(s["prefix"])), None)
         if doc is None:
@@ -570,7 +569,7 @@ def _vendor_of(doc_id: str, vendors: dict) -> str:
 
 
 def cmd_layout(a: argparse.Namespace) -> int:
-    """Bonus: detect the three boxes without annotations; score against the annotations where they exist."""
+    """Detect the three boxes without annotations and score them against the annotations where they exist."""
     import os
 
     os.environ.setdefault("OMP_THREAD_LIMIT", "1")

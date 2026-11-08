@@ -25,7 +25,7 @@ const PRED = 16; // predicted-rock track
 const GAP = 34; // between the tracks and the labels (leader lines run here)
 const SCAN_LINE = "#2F5BD3"; // boundaries drawn over the white scan
 
-/** The window (top depth) with the most distinct rocks, then the most beds - like the labelling kit. */
+/** The window (top depth) with the most distinct rocks, then the most beds. */
 export function bestWindow(intervals: Interval[], windowFt: number): number | null {
   const ivs = intervals.filter((r) => r.top_depth != null && r.bottom_depth != null);
   if (!ivs.length) return null;

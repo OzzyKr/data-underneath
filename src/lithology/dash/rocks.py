@@ -1,11 +1,7 @@
 """Rock names across logs: a display name, a rock family for cross-well comparison, and a colour.
 
-Colours follow each log's own legend (the user's choice): a chromatic swatch is snapped to the nearest hue of a
-validated categorical palette (colour-blind separation, contrast and lightness checked on the dashboard's dark
-surface with the dataviz validator), so a legend's yellow sand stays yellow and its green clay stays green, at a
-strength that reads on screen. A black-and-white swatch has no colour, so the rock takes its family's colour.
-Families use the same hue conventions the legends use (sand yellow, clay green, limestone blue, dolomite violet,
-salt magenta).
+Colours follow each log's legend: a coloured swatch snaps to the nearest hue of a colour-blind-safe palette,
+so yellow sand stays yellow. Black-and-white swatches take their family's colour.
 """
 
 from __future__ import annotations
@@ -16,8 +12,8 @@ import re
 UNRESOLVED = "Unresolved"
 SIMILAR = "Similar types"  # vision narrowed a bed to 2-3 look-alike legend entries but cannot pick one
 
-# Validated dark-mode categorical slots, mapped to rock families by convention. Chart stacking order below keeps
-# neighbouring segments in the validated adjacent order (all checks pass on #121419 and #171A20).
+# Dark-mode categorical slots mapped to rock families by convention; the stacking order below keeps
+# neighbouring segments distinct.
 FAMILY_COLOURS: dict[str, str] = {
     "Limestone": "#3987E5",
     "Silt": "#D95926",

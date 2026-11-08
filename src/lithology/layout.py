@@ -1,23 +1,7 @@
-"""Bonus: find the three boxes (depth column, interpreted lithology column, lithology legend) without the
-organisers' annotation file.
+"""Find the depth column, lithology column and legend on a page without an annotation file.
 
-Classical CV plus the pipeline's own Tesseract OCR. No training and no stored templates, so the detector cannot
-memorise any vendor's page layout. Propose, score, select:
-
-- **body**: the rows spanned by the long vertical track rules. The header ends at the lowest full-width rule just
-  below where those rules begin.
-- **depth column**: numeric OCR tokens (Tesseract ``--psm 11``, digits only, same config as ``scale.py``) in a few
-  bands across the full page width, in whichever orientation the labels are printed. Tokens are clustered by x.
-  A cluster whose values fit one rising line, or that is regularly spaced (abbreviated labels such as 20/40/60),
-  is a depth track. It is snapped to the nearest vertical rules.
-- **legend**: candidates are the header-table cells (closed rule rectangles), the bands between full-width rules,
-  and the box around the rock-name words. They are scored by rock-word share and purity, a legend title, and
-  non-rock text.
-- **lithology column**: candidates are intervals between vertical edges (rules and the edges of solid bands).
-  They are scored by row-uniform fill, *one* pattern per row (a percent-lithology track has several), coverage
-  of the legend's colours, ink spread across the width, and a "Lith…" header above.
-
-Every box comes with a confidence. Diagnostics list the runner-up candidates.
+Classical CV plus Tesseract OCR, no training. Boxes are proposed from the page structure (rules, OCR tokens,
+header cells), scored with fixed cues and returned with a confidence.
 """
 
 from __future__ import annotations
@@ -40,7 +24,7 @@ from lithology.scale import _TESS_CONFIG, hypotheses
 
 log = logging.getLogger(__name__)
 
-# digits only, sparse text; no second inverted pass (low-confidence digits on fills would trigger it on every band)
+# digits only, sparse text
 _DIGITS_CFG = _TESS_CONFIG + " -c tessedit_do_invert=0"
 _TITLE = re.compile(r"litholog|legend|symbol|rock\s*types?|lithologies", re.I)
 _BAD_HEADER = ("%", "desc", "cutt", "percent", "comment", "remark", "show")
@@ -60,7 +44,7 @@ class LayoutResult:
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Page access (rows are read lazily from the PIL image; the pipeline decodes the page anyway)
+# Page access
 
 
 def _gray(a: np.ndarray) -> np.ndarray:
@@ -71,14 +55,12 @@ def _gray(a: np.ndarray) -> np.ndarray:
 
 
 def _ink(a: np.ndarray) -> np.ndarray:
-    """Darkest-possible view for rules: a pixel is dark only if ALL channels are dark, so coloured fills
-    (yellow sand, green shale, cyan limestone) never look like black rule lines."""
+    """Dark only where all channels are dark, so coloured fills never look like rules."""
     return a if a.ndim == 2 else a.max(axis=2)
 
 
 def _noise_sigma(img: Image.Image, n: int = 40) -> float:
-    """Pixel noise of the page (grey levels): robust spread of horizontal differences between paper-white pixels.
-    Clean renders and bilevel scans give 0."""
+    """Pixel noise on paper-white pixels, in grey levels (0 for clean renders and bilevel scans)."""
     W, H = img.size
     ys = np.linspace(0, H - 1, min(n, H)).astype(int)
     g = np.stack([np.asarray(img.crop((0, int(y), W, int(y) + 1)).convert("L"))[0] for y in ys]).astype(np.int16)
@@ -127,8 +109,7 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     dark = deskew_rows(dark, ys, shift)
     n = len(ys)
     inner = (np.arange(W) > 0.015 * W) & (np.arange(W) < 0.985 * W)
-    # 1. columns dark over a large part of the page are rule candidates; the rows where most of them are dark are
-    #    the "structured" rows (no fixed band: logs may end early or start late)
+    # 1. rule candidates: columns dark over much of the page; body rows: where most of them are dark
     cand = np.where((dark.mean(axis=0) > 0.3) & inner)[0]
     if len(cand) < 2:
         return int(0.1 * H), H, cand
@@ -162,8 +143,7 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
         return int(0.1 * H), H, xs
     a, b = long_runs[0][0], long_runs[-1][1] - 1
     top, bot = int(ys[a]), int(min(H, ys[b] + 1))
-    # header bottom rule: lowest near-full-width dark row in the first inches of the structure. (A mirrored snap at
-    # the bottom, onto a repeated footer header, was tried and removed: lone depth grid lines fooled it.)
+    # header bottom rule: lowest near-full-width dark row near the top of the structure
     xa, xb = int(xs.min()), int(xs.max()) + 1
     top = max(0, top - int(step))  # the run starts at the first sample past the rule; look from the sample before
     win_h = int(min(bot - top, cfg.header_search_in * dpi))
@@ -171,7 +151,7 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
         g = _ink(crop_rgb(img, Box(xa, top, xb, top + win_h))) < 150
         cand = np.where(g.mean(axis=1) > 0.85)[0]
         lines = _row_lines(cand, top)
-        # body grid lines are full-width too: on a regular depth grid, follow it up to its first line (the header rule)
+        # on a regular depth grid, walk up the grid to its first line (the header rule)
         P = _grid_period(img, xa, xb, top + int(step) + int(0.2 * dpi), min(bot, top + int(8 * dpi)), dpi)
         start = lines[-1] if lines else None
         if P and start is None:
@@ -222,18 +202,17 @@ def _grid_period(img: Image.Image, xa: int, xb: int, y0: int, y1: int, dpi: floa
 
 
 def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 20) -> np.ndarray:
-    """Per-row horizontal drift of the vertical rules (scan skew, curved drift or stitched scans), in px.
-    Each band's dark-column profile is cross-correlated with a reference band from the log body; only bands that
-    correlate well (normalised peak >= 0.6, so header bands are ignored) are used, and the shift is interpolated
-    between them."""
+    """Per-row horizontal drift of the vertical rules (skewed, curved or stitched scans), in px.
+
+    Each band's dark-column profile is cross-correlated with a reference band inside the log body.
+    """
     n = len(ys)
     zero = np.zeros(n)
     if n < 4 * n_bands:
         return zero
     edges = np.linspace(0, n, n_bands + 1).astype(int)
     prof = [dark[a:b].mean(axis=0).astype(np.float32) for a, b in zip(edges[:-1], edges[1:], strict=False)]
-    # reference: the band with the most columns dark on (nearly) every row, i.e. inside the log body. A fixed
-    # position can fall in the header or below a log that ends early, where nothing correlates with it.
+    # reference: the band with the most always-dark columns, i.e. inside the log body
     ref_i = int(np.argmax([(p >= 0.9).sum() for p in prof]))
     ref = prof[ref_i] - prof[ref_i].mean()
     if np.linalg.norm(ref) < 1e-3:
@@ -275,9 +254,10 @@ def deskew_rows(dark: np.ndarray, ys: np.ndarray, shift: np.ndarray) -> np.ndarr
 
 
 def vertical_edges(rows_rgb: np.ndarray, dpi: float) -> tuple[list[int], np.ndarray, list[tuple[int, int]]]:
-    """Edges = centres of thin rules + both sides of thick dark bands. Also returns the per-x dark fraction and the
-    full x-extent of every thin rule (so a candidate starting at a rule's centre is not mistaken for containing it:
-    at 400 dpi a rule is ~8 px wide)."""
+    """Edges from thin rules (centres) and thick dark bands (both sides).
+
+    Also returns the per-x dark fraction and each rule's full x-extent.
+    """
     dark = (_ink(rows_rgb) < 150).mean(axis=0)
     W = len(dark)
     thin = max(3, int(round(_mm(dpi, 0.6))))
@@ -345,7 +325,7 @@ def _ocr_numbers(arr: np.ndarray, rot: int) -> list[tuple[float, float, float, f
     d = pytesseract.image_to_data(pil, config=_DIGITS_CFG, output_type=pytesseract.Output.DICT)
     out = []
     for t, c, x, y, bw, bh in zip(d["text"], d["conf"], d["left"], d["top"], d["width"], d["height"], strict=False):
-        if float(c) < 0:  # Tesseract reports -1 for non-words; 0 is common for good digits on wide bands
+        if float(c) < 0:  # Tesseract reports -1 for non-words
             continue
         hyp = [v for v, primary in hypotheses(t, 45000) if primary]
         if not hyp:
@@ -392,8 +372,9 @@ def number_tokens(
     rots: list[int] | None = None,
 ) -> tuple[list[tuple], list[int]]:
     """Digit tokens (x, y, value, half-width) in body bands, and the label orientation(s) used.
-    Without ``rots`` the first band is read at 0/90/270 and the orientation whose tokens best fit a rising line is
-    kept (count fallback); the remaining bands are read concurrently (Tesseract runs as a subprocess)."""
+
+    Without ``rots`` the orientation is chosen on the first bands; the remaining bands are read concurrently.
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     W = img.size[0]
@@ -415,8 +396,7 @@ def number_tokens(
     toks: list[tuple] = []
     start = 0
     if not rots:
-        # judge the orientation on the first two bands together; trust it only when >= 3 labels share one line
-        # (any two noise tokens "fit" a line); otherwise keep every orientation, so accuracy is never traded away
+        # pick the orientation on the first two bands; trust it only when >= 3 labels share one line
         probe = bands[:2]
         jobs0 = [(a, band, r) for a, band in probe for r in (0, 90, 270)]
         with ThreadPoolExecutor(3) as ex:
@@ -493,15 +473,14 @@ def depth_candidates(
             else:
                 continue
         xl, xr = float((c[:, 0] - c[:, 3]).min()), float((c[:, 0] + c[:, 3]).max())  # label extents, not centres
-        # tick marks on the scale's rule are read into the labels: accept a rule up to ~0.03 in inside the left
-        # label extent (but never past the label centres)
+        # tick marks on the scale's rule are read as part of the labels: allow a rule slightly inside them
         tuck = int(0.03 * dpi)
         cl = float(np.percentile(c[:, 0], 10))
         lo = int(max(0, xl - reach))
         left = np.where(dark[lo : int(min(xl + tuck, cl))] > 0.6)[0]
         x0 = lo + int(left.max()) + 1 if len(left) else int(max(0, xl - 0.1 * dpi))
         hi = int(min(W, xr + reach))
-        start = int(xr) + 1  # (right side: no tuck; label ends there are the digits themselves)
+        start = int(xr) + 1  # right side: the label edge is the digits themselves
         right = np.where(dark[start:hi] > 0.6)[0]
         x1 = start + int(right.min()) if len(right) else int(min(W, xr + 0.1 * dpi))
         if x1 - x0 < min_w:
@@ -558,9 +537,10 @@ def _rule_top(dk: np.ndarray, x: int, gap: int) -> int:
 
 
 def track_header_texts(img: Image.Image, top: int, dpi: float, sh: int) -> list[tuple[float, float, str]]:
-    """Text of each narrow track's header cell, read upright and rotated both ways: vertical headers ("LITHOLOGY",
-    "Interp Lith", "CUTTING %") are only legible one cell at a time. The cells are cut between the vertical rules
-    of the header's bottom row and pasted onto one canvas per orientation, so it is one Tesseract call each."""
+    """Text of each narrow track's header cell, read upright and rotated both ways.
+
+    The cells are pasted onto one canvas per orientation, so each orientation is a single Tesseract call.
+    """
     W = img.size[0]
     strip = _gray(crop_rgb(img, Box(0, top - sh, W, top)))
     dk = strip < 128
@@ -625,8 +605,10 @@ def track_header_texts(img: Image.Image, top: int, dpi: float, sh: int) -> list[
 
 
 def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tuple[float, float, bool]]:
-    """x-centre, x-width and strength ("Interp"/"Int." = strong) of 'Lith...' header words or track cells, judged by
-    their whole phrase ("% Lithology" and "Lithology Description" do not count)."""
+    """x-centre, width and strength of 'Lith...' header words or track cells.
+
+    Judged by the whole phrase, so "% Lithology" and "Lithology Description" do not count.
+    """
     out = []
     neg = []
 
@@ -655,8 +637,7 @@ def lith_anchors(img: Image.Image, top: int, dpi: float, words: list) -> list[tu
                 neg.append((x, wd))
             elif _POS_HEADER.search(text) and not any(z in text for z in _BAD_HEADER):
                 out.append((x, -wd, bool(_STRONG_HEADER.search(text))))  # negative width marks a whole cell
-        # horizontal headers with raw tokens: the legend word reader drops symbols, so "% Lithology" would otherwise
-        # read as "Lithology" (a positive anchor over the percent-lithology track)
+        # raw tokens keep symbols, so "% Lithology" is not read as "Lithology"
         d = pytesseract.image_to_data(Image.fromarray(strip), config="--psm 11", output_type=pytesseract.Output.DICT)
         raw = [
             (x / s, y / s, (x + w) / s, (y + h) / s, t.strip())
@@ -712,8 +693,7 @@ def _rule_rows(prof: np.ndarray, frac: float, gap: int = 3) -> list[int]:
 
 
 def _split_cell(c: tuple, hl: np.ndarray, vl: np.ndarray, s: float, min_side: float, frac: float = 0.9) -> list[tuple]:
-    """Sub-cells between internal rules that cross (almost) the whole cell, joining up to 3 neighbours: a legend is
-    often one compartment of a bigger frame whose inner divider does not close a rectangle of its own."""
+    """Sub-cells between internal rules that cross (almost) the whole cell, joining up to 3 neighbours."""
     x0, y0, x1, y1 = (int(round(v * s)) for v in c)
     x1, y1 = min(x1, hl.shape[1]), min(y1, hl.shape[0])
     if x1 - x0 < 2 * min_side or y1 - y0 < min_side:
@@ -734,8 +714,7 @@ def _split_cell(c: tuple, hl: np.ndarray, vl: np.ndarray, s: float, min_side: fl
 
 
 def header_cells(img: Image.Image, top: int, dpi: float, cfg: LayoutConfig) -> list[tuple[int, int, int, int]]:
-    """Closed rule rectangles in the header, full-width bands between horizontal rules (also cropped to the outermost
-    vertical rules crossing them), and the sub-cells of all of these between internal rules."""
+    """Header cells: closed rule rectangles, full-width bands between rules, and their sub-cells."""
     W = img.size[0]
     hh = int(min(top, cfg.header_max_in * dpi))
     if hh < 20:
@@ -749,8 +728,7 @@ def header_cells(img: Image.Image, top: int, dpi: float, cfg: LayoutConfig) -> l
         return cv2.morphologyEx(ink, cv2.MORPH_OPEN, kh), cv2.morphologyEx(ink, cv2.MORPH_OPEN, kv)
 
     hl, vl = lines((g < 160).astype(np.uint8))
-    # hairline rules in light grey (PDF exports draw frames at ~200/255): keep them only where they are thin, so a
-    # grey fill or a grey swatch is never read as a rule
+    # light-grey hairline rules (PDF exports): kept only where thin, so grey fills are not rules
     hl2, vl2 = lines((g < 230).astype(np.uint8))
     t = max(3, int(round(0.03 * dpi * s)))
     hl |= hl2 & ~cv2.morphologyEx(hl2, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, t)))
@@ -820,8 +798,7 @@ def _snap_cluster(wc: tuple, words: list, cells: list) -> tuple | None:
 
 @functools.lru_cache(maxsize=4096)
 def _word_kind(t: str) -> str:
-    """rock name / lithology modifier / header metadata / other. Metadata wins: "State" (read as slate) or a
-    "Cement" field label is not a legend entry."""
+    """Classify a word as rock, modifier, header metadata or other (metadata wins)."""
     if _META.search(t):
         return "meta"
     words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", t)]
@@ -861,8 +838,7 @@ def legend_score(box: tuple, words: list, page_w: int, header_h: int, cfg: Layou
         "n_rock": n_rock,
         "n_mod": n_mod,
         "share": n_rock / n_all,
-        # modifiers ("Dolomitic", "Silty", "Pyrite") are legend vocabulary too: a mineral/modifier panel next to the
-        # rock panel is part of the legend, a fossil or drilling-symbol panel is not
+        # modifiers count as legend vocabulary: a mineral panel next to the rocks is part of the legend
         "purity": (n_rock + n_mod) / max(1, n_in),
         "non": n_non / max(1, n_in),
         "title": title,
@@ -882,11 +858,11 @@ def legend_score(box: tuple, words: list, page_w: int, header_h: int, cfg: Layou
 
 
 def _rerank_legend(scored: list, dpi: float) -> list:
-    """Two ordering rules on top of the score (scored is sorted best first):
-    - a candidate nested in the winner, at most half its area, with twice its vocabulary purity and all but at most
-      one of its rock words wins: one stray rock word (a "Cement:" field label) must not buy a frame twice the size;
-    - when the winner's title sits just above it, the candidate with the same frame that starts just above the title
-      wins: the title row belongs to the legend."""
+    """Reorder the scored candidates (best first).
+
+    - a much purer candidate nested in the winner wins;
+    - a title just above the winner pulls in the same frame starting at the title.
+    """
     if not scored:
         return scored
     s0, f0, c0 = scored[0]
@@ -924,8 +900,7 @@ def _rerank_legend(scored: list, dpi: float) -> list:
 
 
 def legend_palette(img: Image.Image, box: tuple, n_max: int = 12, noisy: bool = False) -> np.ndarray:
-    """Distinct saturated fill colours inside the legend (Lab), used to verify the lithology column. On a noisy scan
-    the crop is median-filtered first."""
+    """Distinct saturated fill colours (Lab) inside the legend; median-filtered first on noisy scans."""
     x0, y0, x1, y1 = box
     arr = crop_rgb(img, Box(x0, y0, x1, y1), scale=min(1.0, 800.0 / max(1, x1 - x0)))
     if noisy and min(arr.shape[:2]) >= 5:
@@ -989,8 +964,8 @@ def lith_candidates(
             # a whole rule strictly inside: two tracks, not one (rules the candidate starts/ends on are fine)
             if any(rs > a + 1 and re_ < b - 1 for rs, re_ in rules):
                 continue
-            # cues on the interior: a black rule the candidate starts or ends on is not a second colour
-            a_, b_ = a, b  # (and the anti-aliased fringe just past it)
+            # measure cues on the interior, away from the bounding rules and their fringe
+            a_, b_ = a, b
             for rs, re_ in rules:
                 if rs - 1 <= a <= re_ + 1:
                     a_ = max(a_, re_ + 1 + fringe)
@@ -1078,8 +1053,7 @@ _ANCHORED_FIRST = True
 
 
 def _dedupe_tracks(cands: list[dict], thr: float = 0.85) -> list[dict]:
-    """Keep one of each group of near-identical candidates (x-IoU > thr), so a dozen variants of one track do not
-    become the pool's median and hide it from the robust scores."""
+    """Keep one of each group of near-identical candidates (x-IoU > thr) so they do not skew the robust scores."""
     order = sorted(cands, key=lambda c: (-c["contrast"], -c["fill"]))
     kept: list[dict] = []
     for c in order:
@@ -1105,8 +1079,10 @@ def _page_is_grey(rows_rgb: np.ndarray) -> bool:
 
 
 def _rank_sum(cands: list[dict], cues: dict[str, float]) -> None:
-    """Score = sum of robust within-page scores (v - median) / max(1.48 MAD, floor) with fixed signs (no training).
-    The floor stops tiny differences (0.924 vs 0.917) from being blown up to +-1 on small candidate pools."""
+    """Sum of robust within-page scores (v - median) / max(1.48 MAD, floor), with fixed signs.
+
+    The floor keeps tiny differences on small candidate pools from being amplified.
+    """
     for k, sign in cues.items():
         v = np.array([c[k] for c in cands], float)
         med = np.median(v)
@@ -1146,7 +1122,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     diag["depth_all"] = [list(d["box"]) for d in dcs[:10]]
     if dcs:
         depth = dcs[0]["box"]
-        # share of the cluster's labels on one line is the strongest single cue (dev AUROC 0.90)
+        # share of labels on one line is the strongest depth cue
         d0 = dcs[0]
         frac = d0["inliers"] / max(1, d0["n"])
         d_conf = float(np.clip(frac * min(1.0, d0["inliers"] / 6.0), 0, 1) * (0.7 if d0["regular_only"] else 1.0))
@@ -1193,8 +1169,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     diag["neg_anchors"] = [[round(x), round(wd)] for x, wd in neg_anchors]
     diag["anchors"] = [[round(x), round(wd), int(st)] for x, wd, st in anchors]
     palette = legend_palette(img, legend, noisy=noisy) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
-    # hatch-texture path only for bilevel pages (black ink on white); a colour log converted to grey keeps its solid
-    # mid-grey fills, and the colour cues work on those grey levels
+    # hatch-texture path only for bilevel pages; greyscale copies of colour logs keep their grey fills
     bw_page = (img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))) and _bilevel(rows)
     lrows = rows
     if bw_page:  # hatching skips rows: measure texture on thin bands (darkest pixel over ~0.03 in of rows)
@@ -1211,8 +1186,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     bw = bw_page
     diag["bw"] = bool(bw)
     if bw:  # colour cues are constant on black-and-white pages: judge the hatch texture instead
-        # single sampled rows often fall in the white gap between hatch rows, so the fill gate is loose and the
-        # decisive cue is "the same texture across the width" (a cuttings track has two patterns side by side)
+        # decisive cue: the same texture across the width (a cuttings track has two patterns)
         gated = [c for c in lcs if c["tex_fill"] >= 0.15]
         cues = {"lr": -2.0, "spread": 0.5, "contrast": 0.5}  # texture fill only gates: dotted grid tracks fill too
     else:
@@ -1237,9 +1211,8 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
             c["score"] += cfg.lith_header_bonus * c["header"] - cfg.lith_negative_header_penalty * c["neg_header"]
         pool.sort(key=lambda c: -c["score"])
         best = pool[0]
-        # a track under a "Lithology"/"Interp" header (and under no cuttings/% header) is chosen first: the header is
-        # the most reliable cue we have; the cue score only ranks tracks within that group
-        # only a strong name ("Interp Lith", "Int. Lith") overrides the cues; a bare "Lith" only adds its bonus
+        # a track under a "Lithology"/"Interp" header (and no cuttings/% header) is chosen first;
+        # only a strong name ("Interp Lith") overrides the cue score, a bare "Lith" adds a bonus
         anchored = [c for c in pool if c["strong_header"] and not c["neg_header"] and (bw or c["fill"] >= 0.3)]
         anchored = anchored if _ANCHORED_FIRST else []
         if anchored:
@@ -1247,8 +1220,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
             pool = [best] + [c for c in pool if c is not best]
         diag["lith_anchored"] = bool(anchored)
         lith = (best["x0"], top, best["x1"], bot)
-        # a "Lithology" header over the pick is the strongest cue (dev AUROC 0.81); then a clear margin and, on colour
-        # pages, one colour class per row
+        # confidence: a "Lithology" header over the pick, the score margin and, on colour pages, one colour per row
         margin = best["score"] - (pool[1]["score"] if len(pool) > 1 else 0.0)
         one_class = 1.0 if (bw or best["distinct"] <= 1.15) else 0.0
         li_conf = 0.3 + 0.35 * best["header"] + 0.2 * float(np.clip(margin / 3.0, 0, 1)) + 0.15 * one_class

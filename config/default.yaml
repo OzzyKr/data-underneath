@@ -44,8 +44,7 @@ legend:
 
 naming:
   abstain: false                   # true: write unresolved_label; false: write the best guess, flagged with a low
-                                   # confidence and a "could not differentiate: A or B?" note (Unresolved always
-                                   # scores as wrong when teams are ranked on correctness)
+                                   # confidence and a "could not differentiate" note
   unresolved_label: Unresolved     # CSV name for groups computer vision cannot tell apart
   classical_decisive_margin: 1.0   # runner-up must be this much further away (fixed-scale distance units)
   pretrained_decisive_margin: 0.07 # winner's cosine similarity must beat the runner-up by this much
@@ -55,12 +54,10 @@ naming:
   confidence_one_sure: 0.6
   confidence_unresolved: 0.2      # a best guess between candidates computer vision could not separate
   confidence_lookalike: 0.4        # a guess settled by a look-alike rule (plainest variant, or the commoner rock)
-  # Tie-break between legend entries drawn pixel-identically (e.g. Clay and Shale in some b&w legends): the picture
-  # cannot decide, so the more common rock in mud logs is written. An explicit prior, named in the bed's note.
+  # tie-break between pixel-identical legend entries (e.g. Clay and Shale in b&w legends): the commoner rock
   common_rocks: [shale, sandstone, limestone, siltstone, claystone, dolomite, marl, anhydrite, halite, chalk, coal]
   colour_gate: 12.0                # a best guess must have the bed's fill colour (Lab distance) when any swatch does
-  use_strokes: true                # stroke-shape opinion (scale-invariant; from a teammate's prototype) joins the
-                                   # best-guess vote for groups no opinion settled
+  use_strokes: true                # stroke-shape opinion joins the best-guess vote for unsettled groups
 
 checks:
   min_thickness_ft: 0.5      # beds thinner than this get lower confidence
@@ -72,15 +69,13 @@ render:
 
 runtime:
   workers: 3                 # at most this many documents in parallel (each in its own process)...
-  memory_budget_mb: 6000     # ...and only while their estimated peak memory fits here (8 GB machine). The estimate
-                             # is read from the image header before decoding: huge logs run alone, small ones together.
+  memory_budget_mb: 6000     # ...and only while their estimated peak memory (from the image header) fits here
 
 ai:
-  tier: 2                    # 1 = classical only; 2 = + local pretrained second opinion (measured to help
-                             #     on black-and-white logs); 3 = + cloud LLM
+  tier: 2                    # 1 = classical only; 2 = + local pretrained second opinion; 3 = + cloud LLM
   provider: none             # none | openai | gemini (tier 3 only)
 
-layout:                      # STEP 1 of the pipeline: find the depth column, lithology column and legend on the page
+layout:                      # step 1: find the depth column, lithology column and legend on the page
   source: annotation         # annotation: the box file (.json) when one exists, the detector when not (default)
                              # detect: always detect the boxes (a box file, if any, only scores the detector; A/B)
   body_samples: 3000         # rows sampled down the page to find where the long track rules run
@@ -95,5 +90,5 @@ layout:                      # STEP 1 of the pipeline: find the depth column, li
   max_track_mm: 25.0         # widest interpreted lithology track
   legend_title_bonus: 0.4    # a "Lithology symbols" / "Legend" / "Rock types" title in a header cell
   legend_unsnapped_penalty: 0.3  # a rock-word cluster no header frame holds (often spans the accessory list too)
-  lith_header_bonus: 3.0     # a "Lithology" / "Interp. Lith" header word above a track (strongest cue, AUROC 0.81)
+  lith_header_bonus: 3.0     # a "Lithology" / "Interp. Lith" header word above a track (strongest cue)
   lith_negative_header_penalty: 2.0  # a "Cuttings" / "% Lith" / "Description" header above a track

@@ -135,8 +135,7 @@ export type Answer = {
 export type ProviderInfo = { name: string; label: string; available: boolean; model: string | null; reason: string };
 export type AiStatus = { active: string; model: string | null; providers: ProviderInfo[] };
 
-/** Where a run's three boxes came from: the uploaded box file, or the layout detector (with its confidence and, when a
- * box file was uploaded too, how well the detected boxes overlap it). */
+/** Where a run's boxes came from: the box file, or the layout detector (confidence, IoU vs an uploaded box file). */
 export type RunBoxes = {
   source: "json" | "detector";
   confidence?: Record<string, number>;
@@ -183,7 +182,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     return (await r.json()) as T;
   } catch {
-    // e.g. a dashboard server started before the page was rebuilt answers a new endpoint with the page itself
+    // e.g. an older server answering a newer endpoint with the page itself
     throw new Error(`${url} did not return data. Restart the dashboard (Ctrl+C, then make dash) and reload.`);
   }
 }
@@ -239,7 +238,7 @@ export const useRun = (id: string | null) =>
     refetchInterval: (q) => (q.state.data && ["done", "error"].includes(q.state.data.state) ? false : 600),
   });
 
-// ------------------------------------------------------------------ layout (step 1: the box detector)
+// ------------------------------------------------------------------ layout detection
 
 export type BoxKey = "depth_column" | "interpreted_lithology_column" | "lithology_legend";
 export type BoxMap<T> = Record<BoxKey, T>;

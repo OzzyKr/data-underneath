@@ -63,7 +63,7 @@ class Box:
 
 @dataclass(frozen=True)
 class DocumentBoxes:
-    """The three regions the organisers annotate (or the bonus detector predicts)."""
+    """The three regions the organisers annotate (or the layout detector predicts)."""
 
     depth_column: Box
     lithology_column: Box
@@ -211,8 +211,8 @@ class DocumentResult:
     peak_rss_mb: float = 0.0
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
-    naming: list[dict[str, Any]] = field(default_factory=list)  # per rock group: both opinions + the decision
-    layout: dict[str, Any] = field(default_factory=dict)  # set when the boxes were detected (bonus), not annotated
+    naming: list[dict[str, Any]] = field(default_factory=list)  # per rock group: the opinions and the decision
+    layout: dict[str, Any] = field(default_factory=dict)  # layout step record: box source, confidence, IoU
 
     @property
     def ok(self) -> bool:

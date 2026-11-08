@@ -171,9 +171,9 @@ def majority(values: list[str]) -> str:
 
 
 # ------------------------------------------------------------------------------------------- eye audit
-# Spot labels made by looking at the scan (labels/audit/<doc_id>.csv): short windows in the middle of beds, each
-# with the rock a person (or Claude, source=claude-vision) reads from the column and legend. They are not complete
-# interval labels, so only naming is scored: the predicted name covering most of each window.
+# Spot labels (labels/audit/<doc_id>.csv): short windows mid-bed with the rock read from column and legend.
+# They are not complete interval labels, so only naming is scored: the predicted name covering most of
+# each window.
 
 FLAG_NOTE = "could not differentiate"
 

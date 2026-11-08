@@ -1,8 +1,7 @@
 """Depth scale: read the printed depth labels with OCR and fit a robust pixel-to-depth mapping.
 
-Physical cross-check: the filename's log scale (inches of paper per 100 ft) times the TIFF DPI predicts pixels
-per foot independently of OCR. Disagreement lowers confidence. If OCR fails, there is no absolute depth anchor,
-so the scale is reported as missing rather than invented.
+The filename scale times the TIFF DPI gives an independent pixels-per-foot check. Without OCR labels the
+scale is reported as missing, not invented.
 """
 
 from __future__ import annotations
@@ -111,8 +110,7 @@ def fit_line(
     d = np.array([lb.depth for lb in labels])
     tok = np.array([lb.token for lb in labels])
     prim = np.array([lb.primary for lb in labels])
-    # Candidate pairs come from an evenly spread subset (keeps the search O(1) in practice); every
-    # hypothesis is still scored against each candidate line.
+    # candidate pairs come from an evenly spread subset; every hypothesis is still scored against each line
     order = np.argsort(y)
     cand = order[np.linspace(0, len(order) - 1, min(len(order), max_candidates)).round().astype(int)]
     best_key: tuple[float, float] | None = None
@@ -166,8 +164,7 @@ def read_depth_labels(img: Image.Image, dc: Box, doc_id: str, cfg: ScaleConfig) 
         rgb = crop_rgb(img, Box(col.x0, y0, col.x1, min(col.y1, y0 + win)))
         return (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114])).astype(np.uint8)
 
-    # Orientation: OCR a few probe windows each way; keep the one whose labels best fit a single line
-    # (a wrong orientation also produces digits, but they are not mutually consistent).
+    # orientation: OCR a few probe windows each way and keep the one whose labels best fit one line
     probes = starts[:: max(1, len(starts) // 3)][:3]
     probe_gray = {s: window(s) for s in probes}
     best_k, labels, best_score = 0, [], (-1, -1)

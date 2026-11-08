@@ -1,7 +1,6 @@
-"""Read the lithology legend: find swatches, read their labels, and match interval clusters to them.
+"""Read the lithology legend: find swatches, read their labels, and match bed clusters to them.
 
-Layout-agnostic: labels may sit to the right of their swatch (most mudlogs) or below it (the organisers'
-example). The layout is decided per legend by which pairing explains more swatches.
+Labels may sit right of their swatch or below it; the layout is chosen per legend.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from lithology.models import Box, LegendEntry
 
 log = logging.getLogger(__name__)
 
-# Common rock names, used only to correct OCR typos (e.g. "Llmestone" -> "Limestone"); unknown words pass through.
+# Common rock names, used only to correct OCR typos; unknown words pass through.
 ROCK_WORDS = [
     "anhydrite",
     "argillaceous",
@@ -70,7 +69,7 @@ ROCK_WORDS = [
     "glauconite",
     "oolitic",
     "fossils",
-    # added 2026-11-07: names seen across mud-log legends, so OCR slips in them are corrected too
+    # more names seen in mud-log legends
     "wackestone",
     "packstone",
     "grainstone",
@@ -112,9 +111,8 @@ ROCK_WORDS = [
 ]
 
 
-# Legends also list drilling/show symbols and modifier words. They are not rock types, so a column interval is
-# never named after them. A label is excluded only when *every* word in it is one of these (so "Silty Sandstone"
-# and "Sand and Sandstone" stay rocks, while "Mud loss", "Gas Good" or "Argillaceous" do not).
+# Drilling/show symbols and modifier words: legend entries, but never a bed's name.
+# A label is excluded only when every word is one of these ("Silty Sandstone" stays a rock).
 SYMBOL_WORDS = set(
     [
         "mud",
@@ -198,7 +196,7 @@ def _fragmentary(text: str) -> bool:
     return not any(correct_word(w).lower() in known for w in re.findall(r"[A-Za-z]{2,}", text))
 
 
-# Word stems that mark a legend entry as a drilling, show or sample symbol, an accessory or an alteration, not a rock.
+# Word stems of drilling, show, sample, accessory or alteration entries.
 # They decide only when no rock word is present ("Gas sand" stays a rock).
 NON_ROCK_STEMS = (
     "casing",
@@ -236,7 +234,7 @@ def _non_rock_word(w: str) -> bool:
 
 
 def swatch_is_texture(rgb: np.ndarray, ink_luma: int = 110) -> bool:
-    """A rock swatch is a fill: a coloured area, or ink spread over the whole box. A symbol is one glyph on white."""
+    """A rock swatch is a fill (a coloured area or ink across the box); a symbol is one glyph on white."""
     h, w = rgb.shape[:2]
     inner = rgb[int(h * 0.15) : int(h * 0.85) or h, int(w * 0.15) : int(w * 0.85) or w]
     if inner.size == 0:
@@ -254,13 +252,11 @@ def swatch_is_texture(rgb: np.ndarray, ink_luma: int = 110) -> bool:
 
 
 def is_rock_type(label: str, swatch_rgb: np.ndarray | None = None) -> bool:
-    """Can a bed be named after this legend entry? Text decides first, the swatch picture when the text cannot.
+    """Can a bed be named after this legend entry?
 
-    1. A rock word (after OCR/print slip correction) -> rock ("Silty Sandstone", "Gas sand").
-    2. Otherwise a drilling/show/accessory/alteration word, or only modifiers -> not a rock ("Casing Top",
-       "Pumps Off Gas", "Tripping (POOH-RIH)", "Oil Moderate", "Shell fragments", "Chloritization", "Sandy").
-    3. Otherwise (unknown words only, e.g. "Dacite"-like names not in the list, "Others-H"): rock if its swatch is a
-       fill texture rather than a single glyph; without a swatch, any word of 5+ letters counts (not "rite", "fio").
+    1. A rock word (after spelling correction): rock.
+    2. A drilling, show, accessory or alteration word, or only modifiers: not a rock.
+    3. Unknown words only: rock if the swatch is a fill texture; without a swatch, any word of 5+ letters.
     """
     words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", label)]
     if not words:
@@ -320,11 +316,10 @@ def _one_indel(short: str, long: str) -> bool:
 
 @functools.lru_cache(maxsize=65536)
 def correct_word(word: str) -> str:
-    """Fix OCR and print slips in a purely alphabetic word against known rock words.
+    """Fix OCR and print slips in an alphabetic word against known rock words.
 
-    Accepted: look-alike letter swaps ("Llmestone" -> "Limestone"), OCR's "rn" for "m" ("lirnestone"), and for words
-    of 6+ letters one dropped or doubled letter inside the word ("Silstone" -> "Siltstone"). A trailing letter is
-    never added or removed, so "Dolomites" or "Clay-S" stay exactly as printed.
+    Accepts look-alike letters, "rn" for "m", and one dropped or doubled inner letter in words of 6+ letters.
+    A trailing letter is never added or removed.
     """
     low = word.lower()
     if len(low) < 4 or not low.isalpha() or low in ROCK_WORDS:
@@ -427,11 +422,7 @@ def _is_wordlike(w: _Word) -> bool:
 
 
 def _content_mask(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
-    """Pixels that belong to a drawing rather than paper: dark ink, or a clearly coloured fill.
-
-    Colour matters for light fills: pure yellow (sandstone in most legends) has a luma of ~226, so a luma threshold
-    alone sees only its dots and reads the swatch as a scatter of specks.
-    """
+    """Drawing pixels rather than paper: dark ink, or a clearly coloured fill such as light yellow."""
     px = rgb.astype(np.int16)
     chroma = px.max(axis=2) - px.min(axis=2)
     return (gray < 200) | (chroma > 40)
@@ -442,9 +433,8 @@ def _swatch_candidates(
 ) -> list[Box]:
     """Graphic blobs that are not text.
 
-    Long ruled lines (frames, separators) are removed first so swatches touching them stay separate. A small
-    closing joins a pattern's dots and dashes into one component. A component is text, not a swatch, when
-    confident word-like OCR boxes cover most of it. Boxes nested inside a larger candidate are dropped.
+    Ruled lines are removed first, a small closing joins pattern dots, and blobs mostly covered by confident
+    OCR words are text. Nested boxes are dropped.
     """
     H, W = gray.shape
     ink = (content if content is not None else gray < 200).astype(np.uint8)
@@ -455,8 +445,7 @@ def _swatch_candidates(
     lines = cv2.dilate(hl | vl, np.ones((3, 3), np.uint8))
     ink[lines > 0] = 0
     real = [w for w in words if _is_wordlike(w)]
-    # Cut confident words out, so a label printed touching its swatch does not fuse with it. Only word-like OCR
-    # is cut: "text" read inside a pattern is low-confidence or not word-shaped, so swatches stay intact.
+    # cut confident words out first, so a label touching its swatch does not fuse with it
     for w in real:
         ink[w.y0 : w.y1, w.x0 : w.x1] = 0
     th = int(np.median([w.h for w in real])) if real else 12
@@ -474,7 +463,7 @@ def _swatch_candidates(
             return False
         return text_mask[y : y + h, x : x + w].mean() <= 0.5
 
-    # Swatches stacked with a 1-2 px gap fuse into one strip when closed; the pieces before closing are the swatches.
+    # swatches stacked 1-2 px apart fuse when closed; the pieces before closing are the swatches
     _, raw_lab, raw_st, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     boxes = []
     for i in range(1, n):
@@ -497,9 +486,8 @@ def _swatch_candidates(
 def _split_glued(swatches: list[Box], gray: np.ndarray) -> tuple[list[Box], set[int]]:
     """Trim swatches fused with an unread label printed against them.
 
-    Swatches in one legend share a size. A candidate as tall as the typical swatch but far wider, whose extra part
-    looks different from its swatch part (text on white, not more of the same pattern), is a swatch plus glued
-    text: keep its left part at the typical width (the text is then re-read). Returns (boxes, trimmed indices).
+    A candidate as tall as the typical swatch but much wider, whose extra part is lighter, keeps its left part
+    at the typical width. Returns (boxes, trimmed indices).
     """
     if len(swatches) < 4:
         return swatches, set()
@@ -520,10 +508,10 @@ def _split_glued(swatches: list[Box], gray: np.ndarray) -> tuple[list[Box], set[
 
 
 def _assign(swatches: list[Box], phrases: list[_Phrase], layout: str, th: float, max_gap: float) -> list[list[int]]:
-    """Give every phrase to at most one swatch: the nearest one on its left ('right' layout) or above it
-    ('below' layout). Returns, per swatch, the indices of its phrases in reading order, keeping only phrases that
-    chain on from the swatch (a phrase further away than ``max_gap``, or detached from the previous one, is
-    not part of this label)."""
+    """Give each phrase to at most one swatch: the nearest on its left ('right' layout) or above it ('below').
+
+    Returns, per swatch, its phrase indices in reading order, keeping only phrases that chain on from it.
+    """
     owner: dict[int, int] = {}
     for j, p in enumerate(phrases):
         pcx, pcy = (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2
@@ -592,18 +580,14 @@ def _regularise(
     content: np.ndarray,
     text_mask: np.ndarray,
 ) -> list[Box]:
-    """Repair swatch boxes using the legend's own regular layout.
+    """Repair swatch boxes from the legend's regular layout.
 
-    Legend swatches share one size, line up in columns (rows, for labels under the swatch) and sit at one offset
-    from their labels. All three are learnt from the swatches that were read cleanly. A sparse pattern on white
-    ("^ ^ ^", "X X X") or a light fill falls apart into specks; for every label whose swatch is such a fragment, or
-    is missing, a swatch of the typical size is placed at the typical offset, snapped to the nearest column, and
-    kept only if that spot holds a drawing (ink or colour) rather than paper or text. Each label is anchored on its
-    first word that lies outside the swatch, so pattern glyphs read as text ("Yy", "FO") do not shift it. Fragments
-    are dropped. Legends without a regular layout are returned as read.
+    Swatch size, columns and label offset are learnt from the clean swatches. A label whose swatch is a fragment
+    or missing gets a typical-size swatch at the typical offset, kept only if that spot holds a drawing.
+    Legends without a regular layout are returned as read.
     """
     labelled = [(sw, c) for sw, c in zip(swatches, chains, strict=True) if c]
-    # size from rock swatches when there are enough: some legends are mostly small drilling-symbol icons
+    # size from rock swatches when possible: some legends are mostly small symbol icons
     rocks = [
         sw for sw, c in labelled if any(w.lower() in ROCK_WORDS for w in re.findall(r"[A-Za-z]+", phrases[c[0]].text))
     ]
@@ -757,9 +741,7 @@ def read_legend(rgb: np.ndarray, origin: tuple[int, int], dpi: float, cfg: Legen
             text = " ".join(phrases[j].text for j in chain)
             conf = float(np.mean([phrases[j].conf for j in chain]))
             first_gap = (phrases[chain[0]].x0 - s.x1) if layout == "right" else (phrases[chain[0]].y0 - s.y1)
-            # labels under swatches wrap onto two lines, labels glued to a swatch lose their first letters, and a
-            # label starting far from its swatch lost its first word(s): page OCR missed part of the label, so
-            # re-read its strip and keep the fuller reading
+            # page OCR missed part of this label (two-line or glued labels): re-read its strip, keep the fuller text
             far = layout == "right" and first_gap > usual_gap + 2 * th
             if layout == "below" or far or (swatches.index(s) in glued and _fragmentary(text)):
                 rr, rr_conf = _reread_label(gray, s, swatches, layout, th, upscale, cfg.ocr_min_conf)
@@ -805,10 +787,9 @@ def swatch_descriptor(rgb_full_swatch: np.ndarray, ink_luma: int) -> np.ndarray:
 
 
 def swatch_colour(rgb_full_swatch: np.ndarray, ink_luma: int) -> tuple[tuple[int, int, int], float]:
-    """Fill colour of a swatch (median of its interior's non-ink pixels) and its chroma (max - min channel).
+    """Fill colour of a swatch (median of its non-ink interior) and its chroma (max - min channel).
 
-    A coloured swatch with a black pattern gives its fill; a black-and-white swatch gives white (chroma ~0); a
-    solid dark swatch (coal, "Others-CL") falls back to the median of all its pixels.
+    Solid dark swatches such as coal fall back to the median of all pixels.
     """
     h, w = rgb_full_swatch.shape[:2]
     my, mx = max(1, int(h * 0.15)), max(1, int(w * 0.15))

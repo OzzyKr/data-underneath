@@ -251,8 +251,10 @@ def create_app(paths: Paths | None = None) -> FastAPI:
 
     @app.post("/api/runs")
     async def start_run(files: list[UploadFile], boxes: str = Form("auto")) -> dict[str, Any]:
-        """One scan, plus its box file (.json) if there is one. boxes: "auto" (the box file when uploaded, else the
-        layout detector) or "detect" (always the detector)."""
+        """One scan plus an optional box file (.json).
+
+        ``boxes``: "auto" uses the box file when uploaded, else the layout detector; "detect" always detects.
+        """
         data = [(f.filename or "upload", await f.read()) for f in files]
         try:
             job_id = st().jobs.submit(data, boxes)
@@ -267,7 +269,7 @@ def create_app(paths: Paths | None = None) -> FastAPI:
             raise HTTPException(404, "no such run")
         return s
 
-    # ---------------------------------------------------------------- layout (step 1: the box detector)
+    # ---------------------------------------------------------------- layout detection
 
     def lay() -> LayoutView:
         return app.state.layout

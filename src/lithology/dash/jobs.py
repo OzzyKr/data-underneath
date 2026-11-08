@@ -1,10 +1,7 @@
 """Live runs: a scan dropped on the dashboard goes through the same pipeline as ``lith run``.
 
-The pipeline runs in its own process (one at a time, like a batch worker), reporting each step to a small status
-file; results land in ``out_live/`` and are added to the dashboard database when the run finishes.
-
-Where the three boxes come from: the uploaded box file (.json) when there is one, the layout detector when there is
-not. ``boxes="detect"`` runs the detector even when a box file was uploaded (the file then only scores the detector).
+Each run is a worker process that reports its steps to a status file; results land in ``out_live/``. Boxes come
+from the uploaded box file when there is one, else from the layout detector (``boxes="detect"`` forces it).
 """
 
 from __future__ import annotations
@@ -138,8 +135,7 @@ def run_live(
 
 
 def _boxes_report(layout: dict[str, Any]) -> dict[str, Any]:
-    """Where the run's boxes came from, for the dashboard: "json" (the box file) or "detector" (+ its confidence and,
-    when a box file was uploaded too, how well the detected boxes overlap it)."""
+    """Where the run's boxes came from: "json" or "detector" (with confidence, and IoU vs any uploaded box file)."""
     if layout.get("source") != "detected":
         return {"source": "json"}
     return {
@@ -159,8 +155,10 @@ class Jobs:
         self.lock = threading.Lock()
 
     def submit(self, files: list[tuple[str, bytes]], boxes: str = "auto") -> str:
-        """Queue one scan. ``boxes``: "auto" uses the box file when one is uploaded and the layout detector when
-        not; "detect" always uses the detector."""
+        """Queue one scan.
+
+        ``boxes``: "auto" uses the box file when uploaded, else the detector; "detect" always detects.
+        """
         if boxes not in BOX_MODES:
             raise ValueError(f"boxes must be one of {', '.join(BOX_MODES)}")
         images = [(n, b) for n, b in files if Path(n).suffix.lower() in IMAGE_EXT]

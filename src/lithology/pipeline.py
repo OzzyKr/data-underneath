@@ -122,9 +122,11 @@ def process(
 
 
 def _layout_step(doc: Document, img, cfg: Config, boxes: DocumentBoxes | None) -> tuple[DocumentBoxes, dict]:
-    """Step 1. Boxes passed in by the caller win; ``layout.source: annotation`` (default) uses the box file when it
-    exists; otherwise (no box file, or ``source: detect``) the detector finds the boxes, and a box file, when present,
-    is only used to record how well the detected boxes match it."""
+    """Step 1: find the three boxes.
+
+    Boxes passed in win. With ``layout.source: annotation`` (default) the box file is used when it exists;
+    otherwise the detector runs, and a box file, if present, only scores it.
+    """
     if boxes is not None:
         return boxes, {"source": "supplied"}
     ann = doc.annotation()
@@ -152,7 +154,7 @@ def _process(
     with _timed(t, "load", hook):
         img = open_image(doc.image_path)
 
-    with _timed(t, "layout", hook):  # step 1: where are the depth column, lithology column and legend?
+    with _timed(t, "layout", hook):  # step 1: depth column, lithology column and legend
         boxes, res.layout = _layout_step(doc, img, cfg, boxes)
         if res.layout.get("low_confidence"):
             res.warnings.append(f"layout: low confidence for {res.layout['low_confidence']}")
@@ -209,8 +211,7 @@ def _process(
             inner = [_inner(s) for s in sw_rgb]
             tmpl = template_similarity(patches, inner)
             decisions = [decide(dist[c], None, cfg.naming, tmpl[c]) for c in range(n_clusters)]
-            # Ask the pretrained model only where it can change the answer: groups the pixel template and the
-            # classical matcher left open. Settled groups skip it (it is the slowest step).
+            # ask the pretrained model only for groups the template and classical matcher left open (slowest step)
             open_groups = [c for c, d in enumerate(decisions) if d.reason == "classical match too close to call"]
             sim = np.full((n_clusters, len(entries)), np.nan)
             if cfg.ai.tier >= 2 and open_groups:
@@ -222,9 +223,8 @@ def _process(
                         decisions[c] = decide(dist[c], sim[c], cfg.naming, tmpl[c])
                 except Exception as e:  # the second opinion is optional: degrade to classical only
                     res.warnings.append(f"pretrained second opinion unavailable ({type(e).__name__}: {e})")
-            # Colour veto: in a colour legend a confident name must have the bed's fill colour. A white group named
-            # after a coloured swatch is paper or a text box drawn over the column (dropped); any other clash becomes
-            # a flagged guess among swatches of the right colour.
+            # colour veto: a confident name must share the bed's fill colour. A white group named after a coloured
+            # swatch is paper or a text box (dropped); any other clash becomes a flagged guess.
             sw_fill = np.array([fill_lab(s, cfg.segment.ink_luma) for s in inner])
             paper: set[int] = set()
             if np.mean([e.chroma > 15 for e in entries]) >= 0.3:

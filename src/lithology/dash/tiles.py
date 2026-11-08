@@ -1,13 +1,12 @@
 """Cut each scan into small web tiles for the Image view.
 
-Two tile sets per scan, both sliced into ``tile_h``-px WebP tiles so a 313,800 px scan scrolls smoothly:
+Three tile sets per scan, sliced into ``tile_h``-px WebP tiles so very tall scans scroll smoothly:
 
-* ``c*.webp`` - the lithology column alone, at full resolution: the main track of the Image view;
-* ``t*.webp`` - the wider context (depth column to lithology column, same margins as ``render.render_annotated``),
-  shrunk to at most ``max_width`` px wide: the optional "full scan" track;
-* ``p*.webp`` - the whole page, uncropped, shrunk to at most 1100 px wide: the "whole page" view.
+* ``c*.webp`` - the lithology column alone, at full resolution;
+* ``t*.webp`` - the depth column to the lithology column, shrunk to at most ``max_width`` px wide;
+* ``p*.webp`` - the whole page, shrunk to at most 1100 px wide (the Original scan view).
 
-The legend and each legend swatch are saved alongside for the legend panel.
+The legend and each legend swatch are saved alongside.
 """
 
 from __future__ import annotations

@@ -59,11 +59,10 @@ def test_golden_example_regression(cfg):
     assert res.ok, res.error
     s = score_document(res.intervals, read_csv(Path(EXAMPLE / "example.csv")))
     assert s.depth_mae_ft < 0.5
-    assert s.lithology_accuracy >= 0.83  # 2026-11-07: 0.835 (was 0.20 before the accuracy pass)
-    # 0.848 since bed edges moved into the blank gap between patterns (mean edge error 22 -> 12 px): one edge that
-    # was already ~2 ft off moved just past the 2 ft tolerance. Was 0.91.
+    assert s.lithology_accuracy >= 0.83  # currently 0.835
+    # currently 0.848: one edge sits just past the 2 ft tolerance
     assert s.boundary_f1 >= 0.84
-    assert s.cluster_ari >= 0.85  # 0.90 (was 0.83)
+    assert s.cluster_ari >= 0.85  # currently 0.90
 
 
 @needs_tesseract

@@ -147,7 +147,7 @@ NOTE_SYSTEM = (
 
 
 def plain(text: str) -> str:
-    """House style for model text shown in the dashboard: no em dashes or middle dots between phrases."""
+    """Replace em dashes and middle dots between phrases in model text with commas."""
     text = re.sub(r"\s*[—·]\s*", ", ", text)
     return re.sub(r"\s+,", ",", text).strip(" ,")
 

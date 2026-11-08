@@ -1,5 +1,7 @@
-"""Layout page of the dashboard: step 1 (the box detector) on every image, scored against the annotations, and the
-same detector run on an uploaded image. Reads the newest ``lith layout`` output under ``out/``."""
+"""Layout page back end: detector scores against the annotations, and the detector run on uploaded images.
+
+Reads the newest ``lith layout`` output under ``out/``.
+"""
 
 from __future__ import annotations
 
@@ -235,7 +237,7 @@ class LayoutView:
 
 
 def _notes(diag: dict[str, Any]) -> list[str]:
-    """Short plain-language notes on how the detector decided, from its diagnostics."""
+    """Short notes on how the detector decided, from its diagnostics."""
     out = []
     if diag.get("bw"):
         out.append("Black-and-white page: the lithology column was judged by hatch texture.")

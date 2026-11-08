@@ -35,6 +35,6 @@ dash-ui:        ## build the dashboard front end
 dash: dash-ui   ## serve the dashboard (dev logs) at http://127.0.0.1:8000
 	$(PY) lith dash --open
 
-dash-demo: dash-ui  ## FINAL DEMO ONLY: all logs including holdout, then serve and open the browser
+dash-demo: dash-ui  ## all logs including holdout, then serve and open the browser
 	$(PY) lith dash-build --all
 	$(PY) lith dash --open
