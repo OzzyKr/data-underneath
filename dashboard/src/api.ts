@@ -246,6 +246,8 @@ export type BoxMap<T> = Record<BoxKey, T>;
 export type BoxMetric = { page_mean: number; vendor_macro: number; "iou_gt_0.5": number; "iou_lt_0.3": number };
 export type LayoutRow = {
   doc_id: string;
+  title?: string;
+  variant?: string; // "MD 5 in": tells apart scans of one well
   vendor: string;
   split: string;
   seconds: number | null;

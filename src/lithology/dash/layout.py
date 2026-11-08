@@ -17,7 +17,8 @@ from typing import Any
 from PIL import Image
 
 from lithology.dash.paths import Paths
-from lithology.io import crop_rgb, discover, image_dpi, open_image
+from lithology.dash.titles import short_title
+from lithology.io import crop_rgb, depth_reference, discover, image_dpi, open_image, scale_inches_per_100ft
 from lithology.models import BOX_KEYS, Box
 
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
@@ -35,6 +36,11 @@ def latest_run(paths: Paths) -> Path | None:
         return p if (p / "layout_summary.json").exists() else None
     runs = [p for p in paths.out_batch.glob("layout*") if (p / "layout_summary.json").exists()]
     return max(runs, key=lambda p: (p / "layout_summary.json").stat().st_mtime) if runs else None
+
+
+def _variant(doc_id: str) -> str:
+    inches = scale_inches_per_100ft(doc_id)
+    return " ".join(p for p in (depth_reference(doc_id), f"{inches:g} in" if inches else "") if p)
 
 
 def _num(v: str) -> float | None:
@@ -64,6 +70,8 @@ class LayoutView:
                     continue
                 self.rows[r["doc_id"]] = {
                     "doc_id": r["doc_id"],
+                    "title": short_title(r["doc_id"]),  # the same short name the other pages use
+                    "variant": _variant(r["doc_id"]),  # tells apart scans of one well (MD / TVD, scale)
                     "vendor": r["vendor"],
                     "split": r["split"],
                     "seconds": _num(r["seconds"]),

@@ -191,7 +191,7 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
     layers.push(
       <div
         key={r.key}
-        className="pointer-events-none absolute rounded-[2px] border-2"
+        className={`pointer-events-none absolute rounded-[2px] border-2 ${showsDetected ? "" : "border-dashed"}`}
         style={{ left: X(x0) - 1, top: Y(y0) - 1, width: (x1 - x0) * s + 2, height: (y1 - y0) * s + 2, borderColor: r.color }}
       />,
     );

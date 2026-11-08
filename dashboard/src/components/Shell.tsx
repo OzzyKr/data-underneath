@@ -66,7 +66,7 @@ export default function Shell() {
       <div className="flex min-w-0 shrink grow-[999] basis-[560px] flex-col">
         <header className="flex flex-wrap items-center gap-3 border-b border-line px-6 py-4 lg:px-12">
           {onLayout ? (
-            <span className="text-sm text-muted">Layout detector · step 1</span>
+            <span className="text-sm text-muted">Layout detection</span>
           ) : onInsights ? (
             <span className="text-sm text-muted">All logs</span>
           ) : (
