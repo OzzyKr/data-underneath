@@ -119,6 +119,11 @@ class LayoutConfig:
     legend_unsnapped_penalty: float
     lith_header_bonus: float
     lith_negative_header_penalty: float
+    lith_palette_merge_de: float
+    lith_shade_min: float
+    lith_shade_bias: float
+    lith_constant_share: float
+    lith_constant_penalty: float
 
 
 @dataclass(frozen=True)
