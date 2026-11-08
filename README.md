@@ -285,8 +285,3 @@ tests/              unit and end-to-end tests
 - **Two-letter legend labels** (such as "Ss") are often missed by OCR, and beds of that rock take the nearest
   other entry.
 - **Look-alike swatches** that differ only in sparse marks on white can be confused; such beds are flagged.
-
-## Acknowledgements
-
-Challenge, data and the example annotation format: Viridien (HackTheBurgh). Contributors: OzzyKr (pipeline,
-dashboard), Atharv Salian (layout detector), Jad Ouazzani (stroke-shape opinion, salt and well tables).
