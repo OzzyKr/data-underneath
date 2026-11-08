@@ -1,6 +1,6 @@
 # Demo script (5 minutes)
 
-Every number below can be reproduced with the command next to it, and was measured at commit `b56973b`
+Every number below can be reproduced with the command next to it, and was measured at commit `b56973b` (pipeline) and `63e7412` (layout detector, `out/layout_r23`)
 (`out/run_meta.json`). If a number changes, change it here before presenting it.
 
 ## 0. Before the demo (once)
@@ -44,24 +44,32 @@ Be upfront that ground truth is thin:
 Show the dashboard → **Layout**.
 - Scores are IoU with the annotated boxes.
 
-  | Box | Dev (48 pages, 12 vendors) | Holdout (3 pages, never tuned on) |
+  | Box | Dev (48 pages, 12 vendors) | Holdout (3 pages) |
   |---|---|---|
   | Depth column | 0.856 | 0.83 |
-  | Lithology column | 0.934 | 0.65, right on 2 of 3 |
+  | Lithology column | 0.938 | blind: 0.65, right on 2 of 3 → after the fix: 0.94, 3 of 3 (no longer blind) |
   | Legend | 0.945 | 0.98 |
 
-- Click the worst page to show what it gets wrong, and point out the confidence flag. On dev and holdout, every box
-  with confidence ≥ 0.5 was right; low-confidence boxes are flagged for review.
+- **Tell the holdout story.** The blind holdout caught one miss: Shell AC0336.
+  - Its lithology column has a red fill under a dense black hatch, and the hatch's anti-aliased edges counted as a
+    second colour, so the column was filtered out.
+  - The fix counts colours against the page's own legend. The miss went from 0.00 to 0.88, with no dev page worse and
+    the stress test better (`out/layout_r23`).
+  - The fix was found by looking at a holdout page, so the 3 of 3 is reported as "after diagnosis", not as a blind score.
+- **The needs-review flag** (`layout.review_threshold`, 0.5): every box below the threshold is marked "Needs review"
+  in the outputs and on the dashboard.
+  - No box at or above 0.5 has been wrong, on dev or holdout: 127 of 127.
+  - The flag is cautious: 26 boxes on 22 pages are flagged, and 1 of them is actually wrong.
 - **Detect on an image:** upload a log and get its boxes in about 5 s.
 
 ## 5. Robustness (30 s)
 
 Stress test, one page per vendor (lithology-column IoU):
-- Clean: 0.92
-- Noise: 0.89
+- Clean: 0.94
+- Noise: 0.90
 - Greyscale: 0.84
-- 70% resolution: 0.78
-- 0.1 in scanner skew: about 0.58, **the known weak spot**
+- 70% resolution: 0.88
+- 0.1 in scanner skew: 0.72, **still the weakest case**
 
 ## 6. Where this goes (60 s)
 
