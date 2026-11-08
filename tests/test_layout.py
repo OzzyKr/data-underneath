@@ -129,3 +129,59 @@ def test_body_found_when_log_ends_early(cfg):
     gt = DocumentBoxes.from_dict(doc.annotation["bounding_boxes"])
     res = detect_boxes(img, cfg.layout)
     assert res.boxes.lithology_column.iou(gt.lithology_column) > 0.9
+
+
+def _hatched_page():
+    """A colour log whose interpreted column carries a dense black anti-aliased hatch over its fills, between a
+    constant one-colour strip and a cuttings-like track of two rocks side by side in every row."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    from tests.synth import ROCKS
+
+    rocks = ["Shale", "Sandstone", "Limestone", "Shale", "Sandstone", "Limestone", "Shale"]
+    doc = make_document([(25, r) for r in rocks])
+    arr = np.asarray(doc.image).copy()
+    b = doc.annotation["bounding_boxes"]["interpreted_lithology_column"]
+    x0, y0, x1, y1 = b
+    edges = np.linspace(y0, y1, len(rocks) + 1).astype(int)
+    for (ya, yb), rock in zip(zip(edges[:-1], edges[1:], strict=True), rocks, strict=True):
+        arr[ya:yb, x0:x1] = ROCKS[rock][0]
+    # dense diagonal hatch (period 8 px, about 1/3 of the pixels dark or anti-aliased): a blurred line mask in black
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    alpha = cv2.GaussianBlur(((xs + ys) % 8 == 0).astype(np.float32), (0, 0), 0.6) * 2.0
+    alpha = np.clip(alpha, 0, 1)[..., None]
+    arr[y0:y1, x0:x1] = (arr[y0:y1, x0:x1] * (1 - alpha)).astype(np.uint8)
+    # a constant one-colour strip (a legend colour, no pattern) right of the depth column
+    arr[y0:y1, 440:470] = ROCKS["Shale"][0]
+    # a cuttings-like track: two rocks side by side in every row, proportions and rocks changing down the page
+    for k, (ya, yb) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
+        split = 640 + (20 + 15 * (k % 4))
+        arr[ya:yb, 640:split] = ROCKS[rocks[k]][0]
+        arr[ya:yb, split:720] = ROCKS[rocks[(k + 1) % len(rocks)]][0]
+    for x in (x0, x1 - 1, 440, 469, 640, 719):  # track rules
+        arr[y0:y1, x] = 0
+    img = Image.fromarray(arr)
+    img.info["dpi"] = (200, 200)
+    return img, DocumentBoxes.from_dict(doc.annotation["bounding_boxes"])
+
+
+@needs_tesseract
+def test_hatched_column_beats_constant_strip_and_cuttings_track(cfg):
+    """The hatch's anti-aliased fringe is not a second colour (it snaps to the fill's legend colour), and a strip of
+    one constant colour carries no lithology: the hatched interpreted column must be chosen."""
+    img, gt = _hatched_page()
+    res = detect_boxes(img, cfg.layout)
+    assert res.boxes.lithology_column.iou(gt.lithology_column) > 0.9, res.boxes.lithology_column
+
+
+@needs_tesseract
+@pytest.mark.parametrize("rock", ["Shale", "Sandstone"])
+def test_single_rock_log_is_still_chosen(rock, cfg):
+    """The constant-strip penalty is soft: a log of one lithology all the way down must still be found."""
+    doc = make_document([(150, rock)])
+    doc.image.info["dpi"] = (200, 200)
+    gt = DocumentBoxes.from_dict(doc.annotation["bounding_boxes"])
+    res = detect_boxes(doc.image, cfg.layout)
+    assert res.boxes.lithology_column.iou(gt.lithology_column) > 0.9

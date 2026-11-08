@@ -956,6 +956,47 @@ def _fits(a: int, b: int, x: float, wd: float) -> bool:
     return wd <= 1.5 * (b - a)
 
 
+def _colour_classes(
+    rows_rgb: np.ndarray, key: np.ndarray, sat: np.ndarray, pal: np.ndarray | None, cfg: LayoutConfig
+) -> tuple[np.ndarray, int, np.ndarray]:
+    """Colour class of every pixel. With a legend palette, each saturated pixel takes the legend colour it is a shade
+    of: a black hatch's anti-aliased fringe over a fill is (1 - a) * fill, so it counts as the fill, not as a second
+    colour (cost = distance to the best shade s * colour, s >= the darkest fill shade, plus a small bias against dark
+    shades so a legend colour that is itself dark wins its own pixels). Legend colours closer than the merge distance
+    (Lab) are one class (two shades of one swatch on a scan). Unsaturated pixels (greys) and pages without a palette
+    keep the coarse RGB bins of `key` (343 classes). Also returns which saturated pixels match a legend colour or a
+    shade of one (within 14 Lab units)."""
+    match = np.zeros(key.shape, bool)
+    if pal is None or not sat.any():
+        return key, 343, match
+    P = cv2.cvtColor(pal.astype(np.uint8).reshape(-1, 1, 3), cv2.COLOR_LAB2RGB).reshape(-1, 3).astype(np.float32)
+    pp = np.maximum((P * P).sum(axis=1), 1.0)
+    x = rows_rgb[sat].astype(np.float32)
+    step = 100_000  # bound the (pixels x palette) matrices
+    near, ok = [], []
+    for j in range(0, len(x), step):
+        xj = x[j : j + step]
+        dot = xj @ P.T
+        sh = np.clip(dot / pp, cfg.lith_shade_min, 1.0)
+        res = np.sqrt(np.maximum((xj * xj).sum(axis=1, keepdims=True) - 2 * sh * dot + sh * sh * pp, 0.0))
+        nj = (res + cfg.lith_shade_bias * 255.0 * (1.0 - sh)).argmin(axis=1)
+        near.append(nj)
+        shade = np.clip(sh[np.arange(len(nj)), nj, None] * P[nj], 0, 255).astype(np.uint8)
+        lab = cv2.cvtColor(np.ascontiguousarray(xj.astype(np.uint8)).reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
+        lab = lab.reshape(-1, 3).astype(np.float32)
+        lab_s = cv2.cvtColor(shade.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(np.float32)
+        d_pal = np.linalg.norm(lab[:, None] - pal[None], axis=2).min(axis=1)
+        ok.append((d_pal < 14) | (np.linalg.norm(lab - lab_s, axis=1) < 14))
+    dd = np.linalg.norm(pal[:, None] - pal[None], axis=2)
+    group = np.arange(len(pal))
+    for _ in range(len(pal)):  # connected components of "closer than the merge distance", labelled by smallest index
+        group = np.array([group[dd[i] < cfg.lith_palette_merge_de].min() for i in range(len(pal))])
+    cls = key.copy()
+    cls[sat] = 343 + group[np.concatenate(near)]
+    match[sat] = np.concatenate(ok)
+    return cls, 343 + len(pal), match
+
+
 def lith_candidates(
     rows_rgb: np.ndarray,
     edges: list[int],
@@ -976,6 +1017,8 @@ def lith_candidates(
     key = s // 40
     key = key[..., 0] * 49 + key[..., 1] * 7 + key[..., 2]
     pal = palette if len(palette) else None
+    sat = fillpx & ((mx - mn) > 25)
+    cls, n_cls, match = _colour_classes(rows_rgb, key, sat, pal, cfg)
     rules = rules or []
     fringe = max(1, round(_mm(dpi, 0.15)))
     out = []
@@ -1001,16 +1044,20 @@ def lith_candidates(
             nw = nonwhite[:, a_:b_]
             fp = fillpx[:, a_:b_]
             fill_r = nw.mean(axis=1)
-            k = key[:, a_:b_]
+            k = cls[:, a_:b_]
             R = k.shape[0]
-            hist = np.zeros((R, 343), np.float32)
+            hist = np.zeros((R, n_cls), np.float32)
             ri = np.repeat(np.arange(R), k.shape[1]).reshape(k.shape)
             np.add.at(hist, (ri[fp], k[fp]), 1.0)
             tot = hist.sum(axis=1)
             ok = (fill_r >= 0.3) & (tot > 0)
-            share = hist[ok] / tot[ok, None] if ok.any() else np.zeros((0, 343))
+            share = hist[ok] / tot[ok, None] if ok.any() else np.zeros((0, n_cls))
             homog = float(np.median(share.max(axis=1))) if len(share) else 0.0
             distinct = float(np.mean((share > 0.08).sum(axis=1))) if len(share) else 9.0
+            # down-depth variation: share of rows whose dominant class is the track's most common one (a constant
+            # strip scores 1.0 and carries no lithology; an interpreted column changes rock down the page)
+            dom = share.argmax(axis=1)
+            constant = float(np.bincount(dom).max() / len(dom)) if len(dom) else 1.0
             # colour runs per row (fill pixels only): a percent-lithology track has 2+, an interpreted one 1
             ch = (k[:, 1:] != k[:, :-1]) & fp[:, 1:] & fp[:, :-1]
             runs_row = 1.0 + ch.sum(axis=1)
@@ -1027,12 +1074,10 @@ def lith_candidates(
             thirds = [nw[:, j * wi // 3 : (j + 1) * wi // 3].mean(axis=1) > 0.05 for j in range(3)]
             spread = float(np.mean(thirds[0] & thirds[1] & thirds[2]))
             cov = 0.0
-            if pal is not None:
-                px = rows_rgb[:, a_:b_][fp & ((mx[:, a_:b_] - mn[:, a_:b_]) > 25)]
-                if len(px) > 50:
-                    lab = cv2.cvtColor(px[:: max(1, len(px) // 3000)].reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
-                    lab = lab.reshape(-1, 3).astype(np.float32)
-                    cov = float((np.linalg.norm(lab[:, None] - pal[None], axis=2).min(axis=1) < 14).mean())
+            if pal is not None:  # share of the coloured pixels that are legend colours (or a hatch's shade of one)
+                m = match[:, a_:b_][sat[:, a_:b_]]
+                if len(m) > 50:
+                    cov = float(m.mean())
             outside = np.concatenate([nonwhite[:, max(0, a - 6) : max(0, a - 1)], nonwhite[:, b + 1 : b + 6]], axis=1)
             contrast = float(fill_r.mean() - (outside.mean() if outside.size else 0.0))
             header = float(any(a <= x <= b and _fits(a, b, x, wd) for x, wd, _ in anchors))
@@ -1048,6 +1093,7 @@ def lith_candidates(
                     "homog": homog,
                     "distinct": distinct,
                     "runs": runs,
+                    "constant": constant,
                     "spread": spread,
                     "cov": cov,
                     "contrast": contrast,
@@ -1216,12 +1262,14 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         gated = [c for c in lcs if c["tex_fill"] >= 0.15]
         cues = {"lr": -2.0, "spread": 0.5, "contrast": 0.5}  # texture fill only gates: dotted grid tracks fill too
     else:
-        gated = [c for c in lcs if c["distinct"] <= 1.3 and c["fill"] >= 0.3 and (not len(palette) or c["cov"] >= 0.4)]
+        # colours per row is a ranking cue, not a gate: one borderline cue (e.g. a hatch over the fill) must not
+        # remove the right track from the pool when every other cue favours it
+        gated = [c for c in lcs if c["fill"] >= 0.3 and (not len(palette) or c["cov"] >= 0.4)]
         cues = {"fill": 1.0, "homog": 1.0, "distinct": -1.0, "runs": -1.0, "spread": 1.0, "contrast": 0.5}
         if len(palette):
             cues["cov"] = 1.0
     if not gated and not bw:  # nothing passes: relax the gates before falling back to every candidate
-        gated = [c for c in lcs if c["distinct"] <= 1.6 and c["fill"] >= 0.1 and (not len(palette) or c["cov"] >= 0.2)]
+        gated = [c for c in lcs if c["fill"] >= 0.1 and (not len(palette) or c["cov"] >= 0.2)]
     if not gated and not bw and len(palette):  # sparse patterns on white (e.g. "X X" igneous): legend colours decide
         gated = [c for c in lcs if c["cov"] >= 0.5 and c["fill"] >= 0.05]
     if not gated:  # last resort: anything but a blank strip
@@ -1235,6 +1283,9 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
         _rank_sum(pool, cues)
         for c in pool:
             c["score"] += cfg.lith_header_bonus * c["header"] - cfg.lith_negative_header_penalty * c["neg_header"]
+            if not bw:  # one colour all the way down carries no lithology: a soft penalty (a one-rock log still wins)
+                k = (c["constant"] - cfg.lith_constant_share) / max(1e-6, 1.0 - cfg.lith_constant_share)
+                c["score"] -= cfg.lith_constant_penalty * float(np.clip(k, 0.0, 1.0))
         pool.sort(key=lambda c: -c["score"])
         best = pool[0]
         # a track under a "Lithology"/"Interp" header (and under no cuttings/% header) is chosen first: the header is
