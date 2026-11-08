@@ -6,7 +6,6 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -17,9 +16,9 @@ from pydantic import BaseModel
 
 from lithology.dash import insights as ins
 from lithology.dash.ai import AIError, Provider, default_provider, make_provider, provider_infos
-from lithology.dash.layout import LayoutView
+from lithology.dash.layout import LayoutView, latest_run
 from lithology.dash.paths import Paths
-from lithology.dash.store import Source, ingest, read_summary
+from lithology.dash.store import ingest, live_source, read_summary
 
 log = logging.getLogger(__name__)
 
@@ -65,9 +64,7 @@ class State:
 
     def ingest_live(self, doc_id: str, row: dict[str, str]) -> str:
         reg = json.loads((self.paths.out_live / "sources.json").read_text())[doc_id]
-        src = Source(
-            doc_id, "live", self.paths.out_live, Path(reg["image"]), Path(reg["ann"]) if reg.get("ann") else None
-        )
+        src = live_source(self.paths, doc_id, reg, latest_run(self.paths))
         with self.lock:
             lid = ingest(
                 self.con,
@@ -151,7 +148,7 @@ def create_app(paths: Paths | None = None) -> FastAPI:
     @app.get("/api/logs/{log_id}")
     def log_detail(log_id: str) -> dict[str, Any]:
         row = _log_or_404(st(), log_id)
-        for k in ("boxes", "tiles", "timings"):
+        for k in ("boxes", "boxes_annotated", "boxes_detected", "tiles", "timings"):
             row[k] = json.loads(row[k]) if row[k] else None
         row["warnings"] = [w for w in (row["warnings"] or "").split(" | ") if w]
         row.pop("image_path", None)

@@ -72,6 +72,8 @@ export type LogDetail = LogSummary & {
   image_h: number | null;
   boxes: Boxes | null;
   boxes_source?: "json" | "detector" | null;
+  boxes_annotated?: Boxes | null; // the box file's boxes (organisers' annotation or the uploaded .json)
+  boxes_detected?: Boxes | null; // the layout detector's boxes
   tiles: Tiles | null;
   rocks: Rock[];
   legend: LegendEntry[];

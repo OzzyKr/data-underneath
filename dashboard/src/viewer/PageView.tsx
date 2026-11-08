@@ -7,6 +7,7 @@ import { HiddenNote, SELECT, estimatePxPerFt, labelLayers, placeLabels, rulerLay
 import { Minimap, PAD } from "./StripLog";
 
 export type Fit = "width" | "page";
+export type LayoutKind = "annotated" | "detected";
 
 type Props = {
   log: LogDetail;
@@ -15,7 +16,15 @@ type Props = {
   onSelect: (idx: number) => void;
   fit: Fit;
   spotlight: boolean;
+  layout: LayoutKind; // which boxes the spotlight and outlines show (beds stay where the pipeline read them)
   onOpen: (depth: number) => void; // open the column view at this depth
+};
+
+type Rect = [number, number, number, number];
+const iou = (a: Rect, c: Rect) => {
+  const inter = Math.max(0, Math.min(a[2], c[2]) - Math.max(a[0], c[0])) * Math.max(0, Math.min(a[3], c[3]) - Math.max(a[1], c[1]));
+  const union = (a[2] - a[0]) * (a[3] - a[1]) + (c[2] - c[0]) * (c[3] - c[1]) - inter;
+  return union > 0 ? inter / union : 0;
 };
 
 const LEFT = 20;
@@ -32,9 +41,15 @@ export const REGIONS: { key: BoxKey; name: string; color: string }[] = [
 ];
 
 /** The original scan, uncropped and true to proportion, with what the pipeline read and found drawn on it. */
-export default function PageView({ log, intervals, selected, onSelect, fit, spotlight, onOpen }: Props) {
+export default function PageView({ log, intervals, selected, onSelect, fit, spotlight, layout, onOpen }: Props) {
   const p = log.tiles!.page!;
-  const b = log.boxes!;
+  const b = log.boxes!; // the boxes the pipeline read: beds are drawn on this lithology column
+  const shown = (layout === "detected" ? log.boxes_detected : log.boxes_annotated) ?? b; // spotlight + outlines
+  const showsDetected = layout === "detected" ? !!log.boxes_detected : !log.boxes_annotated && log.boxes_source === "detector";
+  const overlap =
+    showsDetected && log.boxes_annotated && log.boxes_detected
+      ? REGIONS.map((r) => `${r.name.toLowerCase()} ${fmt(iou(log.boxes_detected![r.key], log.boxes_annotated![r.key]), 2)}`).join(", ")
+      : null;
   const el = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1100, h: 700 });
   const [measured, setMeasured] = useState(false);
@@ -128,7 +143,7 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
   // spotlight: dim the page except the three regions the pipeline reads
   if (spotlight) {
     const hole = (k: BoxKey) => {
-      const [x0, y0, x1, y1] = b[k];
+      const [x0, y0, x1, y1] = shown[k];
       const w = (x1 - x0) * s + 6;
       const h = (y1 - y0) * s + 6;
       return `M${X(x0) - 3},${Y(y0) - 3} h${w} v${h} h${-w} Z`;
@@ -166,13 +181,13 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
   const tagLift: Partial<Record<BoxKey, number>> = {};
   {
     const dcR = REGIONS.find((r) => r.key === "depth_column")!;
-    const [dx0, dy0] = b.depth_column;
-    const [lx0, ly0] = b.interpreted_lithology_column;
+    const [dx0, dy0] = shown.depth_column;
+    const [lx0, ly0] = shown.interpreted_lithology_column;
     const overlapX = X(dx0) < X(lx0) ? X(dx0) + tagWidth(dcR) > X(lx0) : X(lx0) + tagWidth(REGIONS[2]) > X(dx0);
     if (overlapX && Math.abs(Y(dy0) - Y(ly0)) < 24) tagLift.depth_column = 22;
   }
   for (const r of REGIONS) {
-    const [x0, y0, x1, y1] = b[r.key];
+    const [x0, y0, x1, y1] = shown[r.key];
     layers.push(
       <div
         key={r.key}
@@ -284,7 +299,8 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
               </span>
             ))}
             <span className="text-[11px] text-faint">
-              {log.boxes_source === "detector" ? "found by the layout detector" : "from the box file"}
+              {showsDetected ? "Detected boxes" : "Annotated boxes"}
+              {overlap ? `, overlap with annotated: ${overlap}` : ""}
             </span>
           </span>
           <span className="absolute" style={{ left: xLabel + 8 }}>

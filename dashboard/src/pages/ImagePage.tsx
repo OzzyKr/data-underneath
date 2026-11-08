@@ -6,7 +6,7 @@ import { useIntervals, useLog, type Interval, type LogDetail } from "../api";
 import { fmt, rememberLog } from "../format";
 import { Dot, ErrorNote, Segmented, bedName } from "../components/ui";
 import StripLog, { type Span } from "../viewer/StripLog";
-import PageView, { type Fit } from "../viewer/PageView";
+import PageView, { type Fit, type LayoutKind } from "../viewer/PageView";
 
 type View = "column" | "page";
 
@@ -19,6 +19,10 @@ const SPANS: { id: Span; label: string }[] = [
   { id: 200, label: "200 ft" },
   { id: 1000, label: "1,000 ft" },
   { id: "all", label: "Whole log" },
+];
+const LAYOUTS: { id: LayoutKind; label: string }[] = [
+  { id: "annotated", label: "Annotated" },
+  { id: "detected", label: "Detected" },
 ];
 const FITS: { id: Fit; label: string }[] = [
   { id: "width", label: "Fit width" },
@@ -74,6 +78,11 @@ export default function ImagePage() {
   const sel = intervals.find((r) => r.idx === selected) ?? null;
   const ready = log.tiles?.col && log.boxes;
   const title = VIEWS.find((v) => v.id === view)!.title;
+  // which boxes the Original scan spotlights: the box file's or the layout detector's (a switch when both exist)
+  const bothLayouts = !!(log.boxes_annotated && log.boxes_detected);
+  const usedLayout: LayoutKind = log.boxes_source === "detector" ? "detected" : "annotated";
+  const layoutParam = params.get("layout");
+  const layout: LayoutKind = bothLayouts && (layoutParam === "annotated" || layoutParam === "detected") ? layoutParam : usedLayout;
 
   return (
     <div className="mx-auto flex max-w-[1320px] flex-col gap-5 px-6 pb-8 pt-7 lg:px-10">
@@ -102,6 +111,9 @@ export default function ImagePage() {
               >
                 Spotlight
               </button>
+              {bothLayouts && (
+                <Segmented label="Boxes shown" items={LAYOUTS} value={layout} onChange={(k) => setParam("layout", k === usedLayout ? null : k)} />
+              )}
             </>
           ) : (
             <Segmented label="Feet per screen" items={SPANS} value={span} onChange={(s) => setParam("span", s === 200 ? null : String(s))} />
@@ -139,7 +151,7 @@ export default function ImagePage() {
             </p>
           ) : view === "page" ? (
             log.tiles?.page ? (
-              <PageView key={`page-${log.log_id}`} log={log} intervals={intervals} selected={selected} onSelect={select} fit={fit} spotlight={spotlight} onOpen={openAt} />
+              <PageView key={`page-${log.log_id}`} log={log} intervals={intervals} selected={selected} onSelect={select} fit={fit} spotlight={spotlight} layout={layout} onOpen={openAt} />
             ) : (
               <p className="m-auto max-w-sm text-center text-sm text-muted">
                 No whole-page tiles yet. Run <code className="font-mono">lith dash-build --rebuild-tiles</code>.

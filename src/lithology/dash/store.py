@@ -38,7 +38,7 @@ CREATE TABLE logs (
   n_intervals INTEGER, n_rocks INTEGER, n_unresolved INTEGER, mean_confidence DOUBLE, px_per_ft DOUBLE,
   scale_points INTEGER, scale_confidence DOUBLE, seconds DOUBLE, peak_rss_mb DOUBLE, timings VARCHAR,
   warnings VARCHAR, image_w INTEGER, image_h INTEGER, boxes VARCHAR, tiles VARCHAR, image_path VARCHAR,
-  added VARCHAR, boxes_source VARCHAR
+  added VARCHAR, boxes_source VARCHAR, boxes_annotated VARCHAR, boxes_detected VARCHAR
 );
 CREATE TABLE intervals (
   log_id VARCHAR, idx INTEGER, top_depth DOUBLE, bottom_depth DOUBLE, thickness_ft DOUBLE, top_y INTEGER,
@@ -68,7 +68,9 @@ class Source:
     source: str  # "batch" | "live"
     out_dir: Path
     image_path: Path | None
-    ann_path: Path | None
+    ann_path: Path | None  # the boxes the run used (batch: the organisers' file)
+    uploaded_ann: Path | None = None  # live runs: the box file uploaded with the scan, if any
+    layout_run: Path | None = None  # newest `lith layout` run: the detector's boxes for dataset scans
 
     @property
     def log_id(self) -> str:
@@ -90,22 +92,38 @@ def _find_image(images: Path, doc_id: str) -> Path | None:
     return None
 
 
+def live_source(paths: Paths, doc_id: str, rec: dict[str, Any], layout_run: Path | None = None) -> Source:
+    """A live run from its ``out_live/sources.json`` record."""
+    # records written before the layout step have no boxes_source: their "ann" is the uploaded (or dataset) box file
+    uploaded = rec.get("uploaded_ann") if "boxes_source" in rec else rec.get("ann")
+    return Source(
+        doc_id,
+        "live",
+        paths.out_live,
+        Path(rec["image"]),
+        Path(rec["ann"]) if rec.get("ann") else None,
+        uploaded_ann=Path(uploaded) if uploaded else None,
+        layout_run=layout_run,
+    )
+
+
 def discover_sources(paths: Paths, include_holdout: bool = False) -> list[Source]:
+    from lithology.dash.layout import latest_run
+
     hold = [] if include_holdout else holdout_prefixes(paths)
+    run = latest_run(paths)
     out: list[Source] = []
     for p in sorted(paths.out_batch.glob("*.csv")):
         if p.name == "run_summary.csv" or any(p.stem.startswith(h) for h in hold):
             continue
         ann = paths.annotations / f"{p.stem}.json"
-        out.append(
-            Source(p.stem, "batch", paths.out_batch, _find_image(paths.images, p.stem), ann if ann.exists() else None)
-        )
+        image = _find_image(paths.images, p.stem)
+        out.append(Source(p.stem, "batch", paths.out_batch, image, ann if ann.exists() else None, layout_run=run))
     reg = paths.out_live / "sources.json"
     if reg.exists():
         for doc_id, rec in json.loads(reg.read_text()).items():
             if (paths.out_live / f"{doc_id}.csv").exists():
-                ann = Path(rec["ann"]) if rec.get("ann") else None
-                out.append(Source(doc_id, "live", paths.out_live, Path(rec["image"]), ann))
+                out.append(live_source(paths, doc_id, rec, run))
     return out
 
 
@@ -283,18 +301,28 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
         "image_path": str(src.image_path) if src.image_path else None,
         "added": dt.datetime.now().isoformat(timespec="seconds"),
         "boxes_source": _boxes_source(src),
+        "boxes_annotated": _json_or_none(annotated_boxes(src)),
+        "boxes_detected": _json_or_none(detected_boxes(src)),
     }
     return {"log": row, "intervals": intervals, "legend": pd.DataFrame(leg_rows), "naming": pd.DataFrame(naming_rows)}
+
+
+def _json_or_none(v: Any) -> str | None:
+    return json.dumps(v) if v else None
+
+
+def _layout_diag(src: Source) -> dict[str, Any]:
+    """The run's layout step record (diagnostics/<doc>_layout.json); {} for runs from before the layout step."""
+    try:
+        return json.loads((src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json").read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def used_boxes(src: Source) -> tuple[dict | None, tuple[int, int] | None]:
     """The boxes the run actually used and the image size: the layout detector's (diagnostics) when it found them,
     else the box file's."""
-    lp = src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json"
-    try:
-        lay = json.loads(lp.read_text())
-    except (OSError, ValueError):
-        lay = {}
+    lay = _layout_diag(src)
     if lay.get("source") == "detected" and lay.get("boxes") and src.image_path and src.image_path.exists():
         with Image.open(src.image_path) as im:
             return lay["boxes"], im.size
@@ -305,12 +333,32 @@ def used_boxes(src: Source) -> tuple[dict | None, tuple[int, int] | None]:
 
 
 def _boxes_source(src: Source) -> str:
-    """Where the run's boxes came from: "detector" (the layout detector) or "json" (a box file)."""
-    lp = src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json"
+    """Where the run's boxes came from: "detector" (the layout detector) or "json" (a box file; also every run from
+    before the layout step)."""
+    return "detector" if _layout_diag(src).get("source") == "detected" else "json"
+
+
+def annotated_boxes(src: Source) -> dict | None:
+    """The box file's boxes (batch: the organisers' annotation; live: the file uploaded with the scan), if any."""
+    p = src.ann_path if src.source == "batch" else src.uploaded_ann
     try:
-        return "detector" if json.loads(lp.read_text()).get("source") == "detected" else "json"
-    except (OSError, ValueError):
-        return "json"  # runs from before the layout step always used the organisers' boxes
+        return Annotation.from_json(p).boxes.to_dict() if p and p.exists() else None
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def detected_boxes(src: Source) -> dict | None:
+    """The layout detector's boxes: from the run itself when it detected them, else from the newest `lith layout`
+    run (dataset scans), if any."""
+    lay = _layout_diag(src)
+    if lay.get("source") == "detected" and lay.get("boxes"):
+        return lay["boxes"]
+    if src.layout_run is None:
+        return None
+    try:
+        return json.loads((src.layout_run / f"{src.doc_id}_layout.json").read_text())["boxes"]
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def _insert(con: duckdb.DuckDBPyConnection, table: str, df: pd.DataFrame) -> None:

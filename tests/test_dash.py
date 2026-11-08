@@ -193,7 +193,9 @@ def test_live_run_adds_a_log(client, dash_repo, synth_doc):
     logs = client.get("/api/logs").json()
     live = [g for g in logs if g["source"] == "live"]
     assert [g["doc_id"] for g in live] == ["live_copy"] and live[0]["log_id"] == s["log_id"]
-    assert client.get(f"/api/logs/{s['log_id']}").json()["boxes_source"] == "json"
+    detail = client.get(f"/api/logs/{s['log_id']}").json()
+    assert detail["boxes_source"] == "json" and detail["boxes_annotated"] == detail["boxes"]
+    assert detail["boxes_detected"] is None  # no detector run for this scan
 
 
 @needs_tesseract
@@ -204,6 +206,7 @@ def test_live_run_without_box_file_uses_the_layout_detector(client, dash_repo, s
     assert s["boxes"]["source"] == "detector" and s["boxes"]["iou_vs_json"] is None
     detail = client.get(f"/api/logs/{s['log_id']}").json()
     assert detail["boxes_source"] == "detector" and detail["boxes"]["interpreted_lithology_column"]
+    assert detail["boxes_detected"] == detail["boxes"] and detail["boxes_annotated"] is None
 
     # a box file uploaded but the detector forced: the file only scores the detected boxes
     files = [
@@ -214,6 +217,9 @@ def test_live_run_without_box_file_uses_the_layout_detector(client, dash_repo, s
     assert s["state"] == "done", s
     assert s["boxes"]["source"] == "detector"
     assert s["boxes"]["iou_vs_json"]["interpreted_lithology_column"] > 0.9
+    detail = client.get(f"/api/logs/{s['log_id']}").json()  # both box sets: the Original scan can switch
+    assert detail["boxes_detected"] == detail["boxes"]
+    assert detail["boxes_annotated"] == synth_doc.annotation["bounding_boxes"]
 
 
 def test_unknown_api_route_is_a_404_not_the_page(dash_repo):
