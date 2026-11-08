@@ -1,77 +1,75 @@
 # data-underneath
 
-Automated lithology extraction from scanned mud-log images (Viridien HackTheBurgh, *Decoding the Subsurface*).
+Lithology interval extraction from scanned mud logs (Viridien HackTheBurgh, *Decoding the Subsurface*).
 
-For each log the pipeline finds the lithology intervals, groups beds drawn with the same pattern, names them from
-the log's own legend, converts pixel rows to depth, and writes a CSV plus an annotated image. It runs offline on a
-laptop CPU and trains nothing: classical image processing and OCR, with a frozen ResNet-18 as a second opinion only
-where the classical methods disagree.
+Per log: interval segmentation, pattern clustering, legend-based naming and pixel-to-depth conversion, written as
+the submission CSV plus an annotated image. CPU-only, offline and training-free: classical computer vision and
+Tesseract OCR, with a frozen ImageNet ResNet-18 consulted only for groups the classical matchers leave undecided.
 
 ## Installation
 
-Requires macOS or Linux, conda, Tesseract 5, about 8 GB of memory, and Node.js 20+ for the dashboard.
+macOS or Linux, conda, Tesseract 5, ~8 GB RAM; Node.js 20+ for the dashboard.
 
 ```bash
-brew install tesseract                 # Linux: sudo apt-get install tesseract-ocr
-conda env create -f environment.yml    # Python 3.12 environment "lithology", installs the `lith` command
+brew install tesseract                 # Linux: apt-get install tesseract-ocr
+conda env create -f environment.yml    # Python 3.12 env "lithology"; installs the `lith` CLI
 conda activate lithology
-make check                             # lint and tests
+make check                             # ruff + pytest
 ```
 
-The first run downloads the ResNet weights (45 MB); after that everything works offline.
+The ResNet weights (45 MB) are fetched on first use; subsequent runs need no network.
 
-## Placing the data
+## Data layout
 
-The data belongs to the organisers and is several gigabytes, so it is not in git (`.gitignore` keeps only empty
-placeholder folders). Place it at the repository root:
+The dataset is organiser-owned and several GB, so it is not versioned; `.gitignore` retains placeholder folders only.
 
 ```
 dataset/
 ├── images/              development scans (.tif, .png, .jpg)
-├── bbox_annotation/     one box file per scan: <scan name>.json
+├── bbox_annotation/     box files, <scan stem>.json
 └── test/
     ├── images/          evaluation scans
-    └── annotations/     their box files
-example/                 optional: the organisers' example; enables the golden accuracy test
+    └── annotations/     box files
+example/                 optional: organisers' worked example; enables the golden regression test
 ```
 
-- The Makefile, `lith check-data` and the dashboard read `dataset/images` and `dataset/bbox_annotation`, so
-  keeping the data there means every command works without extra arguments.
-- A box file is matched to its scan by name (`Well_A.tif` uses `Well_A.json`), in a sibling `bbox_annotation/` or
-  `annotations/` folder or beside the scan.
-- Without a box file, the built-in layout detector finds the three regions (depth column, lithology column, legend)
-  itself: about 5 s slower per scan and slightly less accurate.
+- `dataset/images` and `dataset/bbox_annotation` are the default paths for the Makefile targets, `lith check-data`
+  and the dashboard; `lith run` accepts any directory.
+- Box files resolve by scan stem from a sibling `bbox_annotation/` or `annotations/` directory, then from the
+  scan's own directory.
+- Scans without a box file fall back to the layout detector for the depth column, lithology column and legend
+  (~5 s extra per scan, slightly lower region accuracy).
 
-Run `lith check-data` to see which scans and box files will be picked up.
+`lith check-data` reports scan/box-file pairing, size mismatches and skipped files, and writes `data/manifest.json`.
 
-## Running
+## Usage
 
 ```bash
-lith run dataset/images --out out              # development scans
-lith run dataset/test/images --out out_test    # evaluation scans
+lith run dataset/images --out out              # development set
+lith run dataset/test/images --out out_test    # evaluation set
 ```
 
-Options: `--no-images` (skip annotated PNGs), `--workers N`, `--detect-boxes` (ignore box files),
-`--config FILE`. Expect 8 to 10 s per scan.
+Flags: `--no-images` (skip annotated PNGs), `--workers N`, `--detect-boxes` (ignore box files), `--config FILE`.
+Throughput is 8-10 s per scan.
 
-Each scan produces `<scan>.csv` (submission format: `top_depth, bottom_depth, lithology, top_y, bottom_y,
-cluster_id`) and `<scan>.png`. `diagnostics/` adds a confidence and status per bed (`named`, `similar` or
-`unresolved`), and `run_summary.csv` lists time, memory and warnings per scan.
+Outputs per scan: `<scan>.csv` in submission format (`top_depth, bottom_depth, lithology, top_y, bottom_y,
+cluster_id`) and `<scan>.png`. `diagnostics/` adds per-bed confidence and status (`named` | `similar` |
+`unresolved`); `run_summary.csv` records runtime, peak memory and warnings per scan.
 
-To score against hand labels in `labels/`: `lith eval --pred out --labels labels`.
+Scoring against the hand labels in `labels/`: `lith eval --pred out --labels labels`.
 
 ## Dashboard
 
 ```bash
-make dash-data    # build the dashboard data from out/
-make dash         # serve http://127.0.0.1:8000
+make dash-data    # DuckDB + scan tiles from out/
+make dash         # serves http://127.0.0.1:8000
 ```
 
-Pages: CSV, Image (beds on the scan), Layout (detector scores) and Insights (all logs as one dataset). **Run a scan**
-processes a new scan, with or without its box file. AI answers on the Insights page are optional: copy
-`.env.example` to `.env` and add an API key.
+Pages: CSV, Image (beds on the scan), Layout (detector scores) and Insights (cross-log analysis). **Run a scan**
+executes the pipeline on an uploaded scan; the box file is optional. LLM answers on Insights are optional and need
+a provider key in `.env` (template: `.env.example`).
 
 ## Configuration
 
-All thresholds live in `config/default.yaml`, in physical units rather than pixels. Override any of them with a
-small YAML file passed to `--config`, for example `runtime: {memory_budget_mb: 4000}` on a machine with less memory.
+Thresholds are defined in physical units in `config/default.yaml`. `--config` merges a partial YAML override, e.g.
+`runtime: {memory_budget_mb: 4000}` for machines with less memory.
