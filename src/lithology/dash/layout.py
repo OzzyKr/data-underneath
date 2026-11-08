@@ -16,9 +16,10 @@ from typing import Any
 
 from PIL import Image
 
+from lithology.config import load_config
 from lithology.dash.paths import Paths
 from lithology.io import crop_rgb, discover, image_dpi, open_image
-from lithology.models import BOX_KEYS, Box
+from lithology.models import BOX_KEYS, Box, needs_review
 
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
@@ -58,6 +59,7 @@ class LayoutView:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.lock = threading.Lock()
         self.rows: dict[str, dict[str, Any]] = {}
+        self.review_threshold = load_config().layout.review_threshold
         if self.run:
             for r in csv.DictReader((self.run / "layout_summary.csv").open()):
                 if r["split"] == "holdout" and not include_holdout:
@@ -70,12 +72,17 @@ class LayoutView:
                     "iou": {k: _num(r.get(f"iou_{k}", "")) for k in BOX_KEYS},
                     "confidence": {k: _num(r.get(f"conf_{k}", "")) for k in BOX_KEYS},
                 }
+                row = self.rows[r["doc_id"]]
+                if "needs_review" in r:  # written by the run; older runs lack it: apply the rule to the confidence
+                    row["needs_review"] = [k for k in r["needs_review"].split(";") if k]
+                else:
+                    row["needs_review"] = needs_review(row["confidence"], self.review_threshold)
 
     # ------------------------------------------------------------------ batch results
 
     def summary(self) -> dict[str, Any]:
         if not self.run:
-            return {"run": None, "pages": [], "metrics": None}
+            return {"run": None, "pages": [], "metrics": None, "review_threshold": self.review_threshold}
         s = json.loads((self.run / "layout_summary.json").read_text())
         metrics = {"dev": s.get("dev")}
         if self.include_holdout:
@@ -85,6 +92,9 @@ class LayoutView:
             "mean_seconds": s.get("mean_seconds"),
             "max_seconds": s.get("max_seconds"),
             "metrics": metrics,
+            "review_threshold": self.review_threshold,
+            "needs_review_pages": sum(bool(r["needs_review"]) for r in self.rows.values()),
+            "review_evidence": _visible_evidence(s.get("needs_review"), self.include_holdout),
             "pages": list(self.rows.values()),
             "uploads": [self._job_public(j) for j in self.jobs.values()],
         }
@@ -108,6 +118,7 @@ class LayoutView:
             "body": diag.get("body"),
             "boxes": res["boxes"],
             "annotated": ann.boxes.to_dict() if ann else None,
+            "review_threshold": self.review_threshold,
             "notes": _notes(diag),
         }
 
@@ -133,7 +144,6 @@ class LayoutView:
         return job_id
 
     def _detect(self, job: dict[str, Any]) -> None:
-        from lithology.config import load_config
         from lithology.layout import detect_boxes
 
         job["state"] = "running"
@@ -141,6 +151,7 @@ class LayoutView:
             img = open_image(job["path"])
             t = time.perf_counter()
             res = detect_boxes(img, load_config().layout)
+            conf = {k: round(float(v), 3) for k, v in res.confidence.items()}
             job.update(
                 state="done",
                 seconds=round(time.perf_counter() - t, 1),
@@ -148,7 +159,8 @@ class LayoutView:
                 dpi=res.diagnostics.get("dpi"),
                 body=res.diagnostics.get("body"),
                 boxes=res.boxes.to_dict(),
-                confidence={k: round(float(v), 3) for k, v in res.confidence.items()},
+                confidence=conf,
+                needs_review=needs_review(res.confidence, self.review_threshold),  # unrounded
                 notes=_notes(res.diagnostics),
             )
         except Exception as e:  # shown to the user; the dashboard keeps running
@@ -168,6 +180,7 @@ class LayoutView:
             "elapsed": round(time.time() - j["t0"], 1),
             "seconds": j.get("seconds"),
             "confidence": j.get("confidence"),
+            "needs_review": j.get("needs_review", []),
         }
 
     def _job_detail(self, j: dict[str, Any]) -> dict[str, Any] | None:
@@ -180,6 +193,7 @@ class LayoutView:
             "seconds": j["seconds"],
             "iou": None,
             "confidence": j["confidence"],
+            "needs_review": j["needs_review"],
             "source": "upload",
             "name": j["name"],
             "size": j["size"],
@@ -187,6 +201,7 @@ class LayoutView:
             "body": j["body"],
             "boxes": j["boxes"],
             "annotated": None,
+            "review_threshold": self.review_threshold,
             "notes": j["notes"],
         }
 
@@ -224,6 +239,17 @@ class LayoutView:
 
     def shutdown(self) -> None:
         self.pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _visible_evidence(ev: dict[str, Any] | None, include_holdout: bool) -> dict[str, Any] | None:
+    """The run's flagged-vs-wrong counts for the dashboard: dev only unless holdout is shown (older runs: None)."""
+    if not ev:
+        return None
+    return {
+        "threshold": ev.get("threshold"),
+        "dev": ev.get("dev"),
+        **({"holdout": ev.get("holdout")} if include_holdout else {}),
+    }
 
 
 def _notes(diag: dict[str, Any]) -> list[str]:

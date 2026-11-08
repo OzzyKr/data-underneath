@@ -85,6 +85,8 @@ layout:                      # STEP 1 of the pipeline: find the depth column, li
   source: auto               # auto: use the annotation file when there is one, detect the boxes when there is not;
                              # detect: always detect (bonus / end-to-end evaluation); annotation: same as auto
                              # annotation: use the organisers' boxes when a file exists, detect otherwise (A/B only)
+  review_threshold: 0.5      # a detected box below this confidence is flagged "needs review" (every box >= 0.5 was
+                             # right on dev and holdout; below it some were wrong)
   body_samples: 3000         # rows sampled down the page to find where the long track rules run
   body_gap_in: 0.15          # breaks in the track rules shorter than this are bridged (wider merges the header table)
   header_search_in: 3.0      # the header's bottom rule is searched this far below where the track rules begin

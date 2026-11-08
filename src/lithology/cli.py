@@ -89,6 +89,7 @@ def _run_one(args: tuple[Document, str | None, str, bool]) -> dict:
         "peak_rss_mb": res.peak_rss_mb,
         "timings": json.dumps(res.timings_s),
         "warnings": " | ".join(res.warnings),
+        "_needs_review": res.layout.get("needs_review", []),  # run_meta.json only, not a run_summary.csv column
     }
 
 
@@ -273,6 +274,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     est = [estimate_peak_mb(d) for d in docs]
     rows = run_batch(jobs, est, workers, cfg.runtime.memory_budget_mb, on_row=report)
     wall = time.perf_counter() - t0
+    review = {r["doc_id"]: r.pop("_needs_review") for r in rows if "_needs_review" in r}
+    review = {k: v for k, v in review.items() if v}
+    if review:
+        log.warning(
+            "%d document(s) have detected layout boxes that need review (confidence < %s): %s",
+            len(review),
+            cfg.layout.review_threshold,
+            "; ".join(f"{k} [{', '.join(v)}]" for k, v in review.items()),
+        )
     with open(out / "run_summary.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
@@ -293,6 +303,8 @@ def cmd_run(a: argparse.Namespace) -> int:
         "max_peak_rss_mb": max(mem),
         "workers": workers,
         "memory_budget_mb": cfg.runtime.memory_budget_mb,
+        "layout_review_threshold": cfg.layout.review_threshold,
+        "layout_needs_review": review,  # doc_id -> detected boxes below the threshold (empty: none, or annotated)
     }
     (out / "run_meta.json").write_text(json.dumps(meta, indent=2))
     log.info(
@@ -607,6 +619,31 @@ def _vendor_of(doc_id: str, vendors: dict) -> str:
     return "new:" + doc_id[:24]
 
 
+def _review_evidence(rows: list[dict], threshold: float) -> dict:
+    """Pages and boxes flagged "needs review", and (on annotated pages) whether the rule catches the wrong boxes:
+    flagged boxes that were wrong (IoU < 0.5) vs right, and unflagged boxes that were wrong anyway."""
+    from lithology.models import BOX_KEYS
+
+    out: dict = {
+        "threshold": threshold,
+        "pages": sum(bool(r["needs_review"]) for r in rows),
+        "boxes": sum(len(r["needs_review"].split(";")) for r in rows if r["needs_review"]),
+    }
+    for split in ("dev", "holdout", "all"):
+        c = {"pages": 0, "flagged_wrong": 0, "flagged_right": 0, "unflagged_wrong": 0, "unflagged_right": 0}
+        for r in rows:
+            if (split != "all" and r["split"] != split) or r["iou_depth_column"] == "":
+                continue
+            c["pages"] += 1
+            flagged = set(r["needs_review"].split(";")) if r["needs_review"] else set()
+            for k in BOX_KEYS:
+                wrong = float(r[f"iou_{k}"]) < 0.5
+                c[("flagged_" if k in flagged else "unflagged_") + ("wrong" if wrong else "right")] += 1
+        if c["pages"]:
+            out[split] = c
+    return out
+
+
 def cmd_layout(a: argparse.Namespace) -> int:
     """Bonus: detect the three boxes without annotations; score against the annotations where they exist."""
     import os
@@ -617,9 +654,10 @@ def cmd_layout(a: argparse.Namespace) -> int:
 
     from lithology.io import crop_rgb, open_image
     from lithology.layout import detect_boxes
-    from lithology.models import BOX_KEYS, Box
+    from lithology.models import BOX_KEYS, Box, needs_review
 
     cfg = load_config(Path(a.config) if a.config else None)
+    thr = cfg.layout.review_threshold
     docs = _docs_from(a.inputs)
     if a.only:
         docs = [d for d in docs if any(o in d.doc_id for o in a.only.split(","))]
@@ -656,8 +694,17 @@ def cmd_layout(a: argparse.Namespace) -> int:
                 row[f"oracle3_{k}"] = round(max([Box.from_seq(c).iou(gt) for c in cands] + [row[f"iou_{k}"]]), 3)
             else:
                 row[f"iou_{k}"] = row[f"oracle3_{k}"] = ""
+        review = needs_review(lay.confidence, thr)
+        row["needs_review"] = ";".join(review)  # boxes a human must check (confidence < layout.review_threshold)
         rows.append(row)
-        record = {"boxes": pred, "confidence": lay.confidence, "diagnostics": lay.diagnostics, **row}
+        record = {
+            "boxes": pred,
+            "confidence": lay.confidence,
+            "diagnostics": lay.diagnostics,
+            **row,
+            "needs_review": review,
+            "review_threshold": thr,
+        }
         (out / f"{d.doc_id}_layout.json").write_text(json.dumps(record, indent=1, default=str))
         if not a.no_images:  # page preview: detected boxes (thick), annotated boxes (thin black)
             W, H = img.size
@@ -732,6 +779,7 @@ def cmd_layout(a: argparse.Namespace) -> int:
                 "conf_auroc": round(auroc, 3) if auroc is not None else None,
             }
         summary[split] = part
+    summary["needs_review"] = _review_evidence(rows, thr)
     (out / "layout_summary.json").write_text(json.dumps(summary, indent=2))
     log.info("layout summary: %s", json.dumps(summary))
     return 0

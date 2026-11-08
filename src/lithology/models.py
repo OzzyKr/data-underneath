@@ -17,6 +17,18 @@ CSV_COLUMNS: tuple[str, ...] = ("top_depth", "bottom_depth", "lithology", "top_y
 BOX_KEYS = ("depth_column", "interpreted_lithology_column", "lithology_legend")
 
 
+def needs_review(confidence: dict[str, Any] | None, threshold: float) -> list[str]:
+    """Box keys whose detected confidence is below ``layout.review_threshold``: a human must check these boxes.
+
+    Boxes with no confidence recorded are not flagged (nothing to judge them by)."""
+    out = []
+    for k in BOX_KEYS:
+        v = (confidence or {}).get(k)
+        if v is not None and v == v and float(v) < threshold:  # v == v: NaN is "no confidence"
+            out.append(k)
+    return out
+
+
 @dataclass(frozen=True)
 class Box:
     """Axis-aligned box in full-image pixels, x1/y1 exclusive."""
