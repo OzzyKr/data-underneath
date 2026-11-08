@@ -396,6 +396,7 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
             res.intervals,
             max_height_px=cfg.render.max_height_px,
             coverage=cfg.render.coverage,
+            min_width_px=cfg.render.min_width_px,
             title=title,
         )
         view.save(out_dir / f"{doc.doc_id}.png", optimize=True)

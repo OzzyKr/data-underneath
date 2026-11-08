@@ -105,12 +105,14 @@ def render_annotated(
     *,
     max_height_px: int = 20000,
     coverage: float = 0.5,
+    min_width_px: int = 900,
     title: str = "",
 ) -> Image.Image:
     """Lithology column with predicted intervals, boundary depths and labels, plus a colour key on top.
 
     The view spans the depth column to the lithology column (with margins for labels) and is shrunk so it is at
-    most ``max_height_px`` tall.
+    most ``max_height_px`` tall. A very tall log is shrunk more vertically than horizontally, so the view stays at
+    least ``min_width_px`` wide (or the full region width, if narrower) and its labels and key stay readable.
     """
     dc, lc = boxes.depth_column, boxes.lithology_column
     y0 = min(dc.y0, lc.y0)
@@ -123,11 +125,14 @@ def render_annotated(
     region = Box(x0, max(0, y0 - 40), x1, min(img.height, y1 + 40))
     scale = min(1.0, max_height_px / region.height)
     view = Image.fromarray(crop_rgb(img, region, scale))
+    xscale = max(scale, min(1.0, min_width_px / region.width))
+    if xscale > scale:  # stretch back horizontally: a log is read along its depth, the width only needs legibility
+        view = view.resize((max(1, round(region.width * xscale)), view.height), Image.Resampling.LANCZOS)
 
     overlay = Image.new("RGBA", view.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     font = get_font(13)
-    sx = lambda x: (x - region.x0) * scale  # noqa: E731
+    sx = lambda x: (x - region.x0) * xscale  # noqa: E731
     sy = lambda y: (y - region.y0) * scale  # noqa: E731
     for b, name in ((dc, "depth"), (lc, "lithology")):
         draw.rectangle([sx(b.x0), sy(b.y0), sx(b.x1) - 1, sy(b.y1) - 1], outline=BOX_COLORS[name] + (255,), width=2)

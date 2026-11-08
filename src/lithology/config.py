@@ -87,6 +87,7 @@ class ChecksConfig:
 class RenderConfig:
     max_height_px: int
     coverage: float
+    min_width_px: int = 900
 
 
 @dataclass(frozen=True)

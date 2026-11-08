@@ -69,6 +69,7 @@ checks:
 render:
   max_height_px: 20000       # annotated image is shrunk so it is at most this tall
   coverage: 0.5              # fraction of the lithology column painted with the prediction
+  min_width_px: 900          # tall logs are shrunk vertically more than horizontally so labels stay readable
 
 runtime:
   workers: 3                 # at most this many documents in parallel (each in its own process)...
