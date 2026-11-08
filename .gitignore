@@ -1,6 +1,9 @@
 # Data (keep the folder, ignore contents)
 dataset/*
 !dataset/.gitkeep
+!dataset/test/
+dataset/test/*
+!dataset/test/.gitkeep
 
 # Local examples
 example/
