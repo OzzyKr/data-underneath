@@ -149,14 +149,60 @@ def body_range(img: Image.Image, dpi: float, cfg: LayoutConfig) -> tuple[int, in
     if win_h > 10:
         g = _ink(crop_rgb(img, Box(xa, top, xb, top + win_h))) < 150
         cand = np.where(g.mean(axis=1) > 0.85)[0]
-        if len(cand):
-            top = top + int(cand[-1]) + 1
+        lines = _row_lines(cand, top)
+        # body grid lines are full-width too: on a regular depth grid, follow it up to its first line (the header rule)
+        P = _grid_period(img, xa, xb, top + int(step) + int(0.2 * dpi), min(bot, top + int(8 * dpi)), dpi)
+        start = lines[-1] if lines else None
+        if P and start is None:
+            ls = _full_rows(img, xa, xb, top, int(top + P + 4), 0.75)
+            start = ls[0] if ls else None
+        if start is not None:
+            s0, e0 = start
+            moved = False
+            while P:
+                up = _full_rows(img, xa, xb, max(0, int(s0 - P) - 4), max(1, int(s0 - P) + 5), 0.85)
+                if not up:
+                    break
+                (s0, e0), moved = up[0], True
+            if lines or moved:
+                top = e0 + 1
     return top, bot, xs
+
+
+def _row_lines(rows: np.ndarray, y0: int) -> list[tuple[int, int]]:
+    """Group row indices (offset by y0) into lines: runs with gaps of at most 2 px."""
+    lines: list[list[int]] = []
+    for y in rows:
+        if lines and y - lines[-1][1] <= 2:
+            lines[-1][1] = int(y)
+        else:
+            lines.append([int(y), int(y)])
+    return [(y0 + a, y0 + b) for a, b in lines]
+
+
+def _full_rows(img: Image.Image, xa: int, xb: int, y0: int, y1: int, thr: float) -> list[tuple[int, int]]:
+    """Horizontal lines in rows y0..y1 whose ink covers more than thr of the span xa..xb."""
+    if y1 - y0 < 1:
+        return []
+    g = _ink(crop_rgb(img, Box(xa, y0, xb, y1))) < 150
+    return _row_lines(np.where(g.mean(axis=1) > thr)[0], y0)
+
+
+def _grid_period(img: Image.Image, xa: int, xb: int, y0: int, y1: int, dpi: float) -> float | None:
+    """Spacing of a regular depth grid (full-width lines at a fixed step) in rows y0..y1, or None."""
+    ls = _full_rows(img, xa, xb, y0, y1, 0.75)
+    if len(ls) < 3:
+        return None
+    d = np.diff([a for a, _ in ls]).astype(float)
+    med = float(np.median(d))
+    if med < 0.1 * dpi or (np.abs(d - med) <= max(2, 0.02 * med)).mean() < 0.6:
+        return None
+    return med
 
 
 def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 20) -> np.ndarray:
     """Per-row horizontal drift of the vertical rules (scan skew, curved drift or stitched scans), in px.
-    Each band's dark-column profile is cross-correlated with a reference band from the lower page; only bands that
+    Each band's dark-column profile is cross-correlated with a reference band from the log body; only bands that
     correlate well (normalised peak >= 0.6, so header bands are ignored) are used, and the shift is interpolated
     between them."""
     n = len(ys)
@@ -165,7 +211,9 @@ def estimate_skew(dark: np.ndarray, ys: np.ndarray, W: int, n_bands: int = 20) -
         return zero
     edges = np.linspace(0, n, n_bands + 1).astype(int)
     prof = [dark[a:b].mean(axis=0).astype(np.float32) for a, b in zip(edges[:-1], edges[1:], strict=False)]
-    ref_i = int(0.8 * n_bands)
+    # reference: the band with the most columns dark on (nearly) every row, i.e. inside the log body. A fixed
+    # position can fall in the header or below a log that ends early, where nothing correlates with it.
+    ref_i = int(np.argmax([(p >= 0.9).sum() for p in prof]))
     ref = prof[ref_i] - prof[ref_i].mean()
     if np.linalg.norm(ref) < 1e-3:
         return zero
