@@ -48,13 +48,13 @@ export default function Shell() {
             <ImageIcon size={16} strokeWidth={1.75} aria-hidden="true" />
             Image
           </NavLink>
-          <NavLink to="/insights" className={navClass}>
-            <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />
-            Insights
-          </NavLink>
           <NavLink to="/layout" className={navClass}>
             <ScanSearch size={16} strokeWidth={1.75} aria-hidden="true" />
             Layout
+          </NavLink>
+          <NavLink to="/insights" className={navClass}>
+            <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />
+            Insights
           </NavLink>
         </div>
         <p className="mt-auto px-3 text-xs leading-relaxed text-faint">
