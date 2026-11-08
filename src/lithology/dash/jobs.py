@@ -35,10 +35,10 @@ BOX_MODES = ("auto", "detect")  # auto: the box file when uploaded, else the det
 
 
 def _write_status(path: Path, **kw: Any) -> None:
-    cur = json.loads(path.read_text()) if path.exists() else {}
+    cur = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     cur.update(kw)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cur))
+    tmp.write_text(json.dumps(cur), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -97,10 +97,10 @@ def run_live(
     summary = out / "run_summary.csv"
     rows = []
     if summary.exists():
-        with open(summary, newline="") as f:
+        with open(summary, newline="", encoding="utf-8") as f:
             rows = [r for r in csv.DictReader(f) if r["doc_id"] != doc_id]
     rows.append(row)
-    with open(summary, "w", newline="") as f:
+    with open(summary, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS)
         w.writeheader()
         w.writerows(rows)
@@ -109,17 +109,18 @@ def run_live(
         w, h = im.size
     used = Path(image).with_name(f"{doc_id}.boxes.json")
     used.write_text(
-        json.dumps({"image_name": Path(image).name, "width": w, "height": h, "bounding_boxes": res.boxes.to_dict()})
+        json.dumps({"image_name": Path(image).name, "width": w, "height": h, "bounding_boxes": res.boxes.to_dict()}),
+        encoding="utf-8",
     )
     reg = out / "sources.json"
-    sources = json.loads(reg.read_text()) if reg.exists() else {}
+    sources = json.loads(reg.read_text(encoding="utf-8")) if reg.exists() else {}
     sources[doc_id] = {"image": image, "ann": str(used), "uploaded_ann": ann, "boxes_source": boxes["source"]}
-    reg.write_text(json.dumps(sources, indent=1))
+    reg.write_text(json.dumps(sources, indent=1), encoding="utf-8")
     done["write"] = round(time.perf_counter() - t, 2)
 
     _write_status(st, step="tiles", steps=done)
     t = time.perf_counter()
-    legend = json.loads((out / "diagnostics" / f"{doc_id}_legend.json").read_text())
+    legend = json.loads((out / "diagnostics" / f"{doc_id}_legend.json").read_text(encoding="utf-8"))
     build_tiles(Path(image), res.boxes, legend, Path(tiles_dir))
     done["tiles"] = round(time.perf_counter() - t, 2)
     _write_status(
@@ -231,7 +232,7 @@ class Jobs:
         job = self.jobs.get(job_id)
         if job is None:
             return None
-        st = json.loads(job["status"].read_text()) if job["status"].exists() else {}
+        st = json.loads(job["status"].read_text(encoding="utf-8")) if job["status"].exists() else {}
         state = "error" if job["error"] else st.get("state", "queued")
         end = job.get("finished") or time.time()
         return {

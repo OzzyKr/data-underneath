@@ -145,9 +145,9 @@ def make_item(
         leg = leg.resize((1600, round(leg.height * 1600 / leg.width)), Image.Resampling.LANCZOS)
     leg.save(out_dir / f"{key}_legend.png")
     names = sorted({e.label for e in res.legend})
-    (out_dir / f"{key}_legend_names.txt").write_text("\n".join(names) + "\n")
+    (out_dir / f"{key}_legend_names.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
 
-    with open(out_dir / f"{key}.csv", "w", newline="") as f:
+    with open(out_dir / f"{key}.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=KIT_COLUMNS)
         w.writeheader()
         w.writerows(rows)
@@ -166,16 +166,16 @@ def make_item(
 
 
 def save_manifest(items: list[KitItem], out_dir: Path) -> None:
-    (out_dir / "kit.json").write_text(json.dumps([i.__dict__ for i in items], indent=2))
+    (out_dir / "kit.json").write_text(json.dumps([i.__dict__ for i in items], indent=2), encoding="utf-8")
 
 
 def import_kit(kit_dir: Path, labels_dir: Path) -> list[str]:
     """Convert corrected kit CSVs into label files (organisers' format). Returns a list of problems found."""
-    items = [KitItem(**d) for d in json.loads((kit_dir / "kit.json").read_text())]
+    items = [KitItem(**d) for d in json.loads((kit_dir / "kit.json").read_text(encoding="utf-8"))]
     problems: list[str] = []
     split: dict[str, str] = {}
     for it in items:
-        with open(kit_dir / f"{it.key}.csv", newline="") as f:
+        with open(kit_dir / f"{it.key}.csv", newline="", encoding="utf-8") as f:
             rows = [r for r in csv.DictReader(f) if any((v or "").strip() for v in r.values())]
         ivs: list[Interval] = []
         prev_bottom = None
@@ -209,8 +209,10 @@ def _update_split(labels_dir: Path, new: dict[str, str]) -> None:
     import yaml
 
     path = labels_dir / "manifest.yaml"
-    header = "".join(line for line in path.read_text().splitlines(keepends=True) if line.startswith("#"))
-    data = yaml.safe_load(path.read_text()) or {}
+    header = "".join(
+        line for line in path.read_text(encoding="utf-8").splitlines(keepends=True) if line.startswith("#")
+    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     split = dict(data.get("split") or {})
     split.update(new)
-    path.write_text(header + yaml.safe_dump({"split": dict(sorted(split.items()))}, sort_keys=False))
+    path.write_text(header + yaml.safe_dump({"split": dict(sorted(split.items()))}, sort_keys=False), encoding="utf-8")

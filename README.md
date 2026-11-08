@@ -6,6 +6,19 @@ Per log: interval segmentation, pattern clustering, legend-based naming and pixe
 the submission CSV plus an annotated image. CPU-only, offline and training-free: classical computer vision and
 Tesseract OCR, with a frozen ImageNet ResNet-18 consulted only for groups the classical matchers leave undecided.
 
+## WINDOWS (untested)
+
+This `windows` branch adds Windows support: peak memory without the Unix-only `resource` module, UTF-8 for every
+text file, and Tesseract lookup. It has not been validated on Windows hardware; CI runs the test suite on
+`windows-latest`.
+
+- Tesseract: install the UB Mannheim build; `C:\Program Files\Tesseract-OCR` is found automatically, otherwise set
+  `TESSERACT_CMD` to the full path of `tesseract.exe`.
+- Create the environment from a Miniforge or Anaconda prompt: `conda env create -f environment.yml`.
+- No `make` on Windows; run the targets directly: `ruff check . && pytest -q` (check), `lith dash-build` (dash-data),
+  `cd dashboard && npm install && npm run build && cd ..` then `lith dash --open` (dash).
+- Enable Windows long-path support if the repository sits in a deep folder.
+
 ## Installation
 
 macOS or Linux, conda, Tesseract 5, ~8 GB RAM; Node.js 20+ for the dashboard.

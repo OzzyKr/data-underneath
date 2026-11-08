@@ -80,7 +80,7 @@ class Source:
 def holdout_prefixes(paths: Paths) -> list[str]:
     if not paths.selection.exists():
         return []
-    data = yaml.safe_load(paths.selection.read_text()) or {}
+    data = yaml.safe_load(paths.selection.read_text(encoding="utf-8")) or {}
     return [d["prefix"] for d in data.get("documents", []) if d.get("split") == "holdout"]
 
 
@@ -121,7 +121,7 @@ def discover_sources(paths: Paths, include_holdout: bool = False) -> list[Source
         out.append(Source(p.stem, "batch", paths.out_batch, image, ann if ann.exists() else None, layout_run=run))
     reg = paths.out_live / "sources.json"
     if reg.exists():
-        for doc_id, rec in json.loads(reg.read_text()).items():
+        for doc_id, rec in json.loads(reg.read_text(encoding="utf-8")).items():
             if (paths.out_live / f"{doc_id}.csv").exists():
                 out.append(live_source(paths, doc_id, rec, run))
     return out
@@ -131,7 +131,7 @@ def read_summary(out_dir: Path) -> dict[str, dict[str, str]]:
     p = out_dir / "run_summary.csv"
     if not p.exists():
         return {}
-    with open(p, newline="") as f:
+    with open(p, newline="", encoding="utf-8") as f:
         return {r["doc_id"]: r for r in csv.DictReader(f)}
 
 
@@ -165,11 +165,11 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
     legend = []
     lp = src.out_dir / "diagnostics" / f"{src.doc_id}_legend.json"
     if lp.exists():
-        legend = json.loads(lp.read_text())
+        legend = json.loads(lp.read_text(encoding="utf-8"))
     naming = []
     np_ = src.out_dir / "diagnostics" / f"{src.doc_id}_naming.json"
     if np_.exists():
-        naming = json.loads(np_.read_text())
+        naming = json.loads(np_.read_text(encoding="utf-8"))
 
     by_label = {_norm(e["label"]): e for e in legend}
     rocks_in_order = []
@@ -297,7 +297,7 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
         "image_w": size[0] if size else None,
         "image_h": size[1] if size else None,
         "boxes": json.dumps(boxes) if boxes else None,
-        "tiles": tiles_meta.read_text() if tiles_meta.exists() else None,
+        "tiles": tiles_meta.read_text(encoding="utf-8") if tiles_meta.exists() else None,
         "image_path": str(src.image_path) if src.image_path else None,
         "added": dt.datetime.now().isoformat(timespec="seconds"),
         "boxes_source": _boxes_source(src),
@@ -314,7 +314,7 @@ def _json_or_none(v: Any) -> str | None:
 def _layout_diag(src: Source) -> dict[str, Any]:
     """The run's layout step record (diagnostics/<doc>_layout.json); {} for runs from before the layout step."""
     try:
-        return json.loads((src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json").read_text())
+        return json.loads((src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -353,7 +353,7 @@ def detected_boxes(src: Source) -> dict | None:
     if src.layout_run is None:
         return None
     try:
-        return json.loads((src.layout_run / f"{src.doc_id}_layout.json").read_text())["boxes"]
+        return json.loads((src.layout_run / f"{src.doc_id}_layout.json").read_text(encoding="utf-8"))["boxes"]
     except (OSError, ValueError, KeyError):
         return None
 
@@ -432,7 +432,7 @@ def tile_args(src: Source, paths: Paths) -> tuple[str, str, dict, list, str] | N
     if boxes is None:
         return None
     lp = src.out_dir / "diagnostics" / f"{src.doc_id}_legend.json"
-    legend = json.loads(lp.read_text()) if lp.exists() else []
+    legend = json.loads(lp.read_text(encoding="utf-8")) if lp.exists() else []
     return src.log_id, str(src.image_path), boxes, legend, str(paths.tiles / src.log_id)
 
 
@@ -480,6 +480,6 @@ def build(
     }
     run_meta = paths.out_batch / "run_meta.json"
     if run_meta.exists():
-        meta["pipeline"] = json.loads(run_meta.read_text())
-    paths.build_meta.write_text(json.dumps(meta, indent=2))
+        meta["pipeline"] = json.loads(run_meta.read_text(encoding="utf-8"))
+    paths.build_meta.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta

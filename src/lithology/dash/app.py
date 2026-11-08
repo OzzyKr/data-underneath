@@ -63,7 +63,7 @@ class State:
         return self._provider
 
     def ingest_live(self, doc_id: str, row: dict[str, str]) -> str:
-        reg = json.loads((self.paths.out_live / "sources.json").read_text())[doc_id]
+        reg = json.loads((self.paths.out_live / "sources.json").read_text(encoding="utf-8"))[doc_id]
         src = live_source(self.paths, doc_id, reg, latest_run(self.paths))
         with self.lock:
             lid = ingest(
@@ -120,7 +120,7 @@ def create_app(paths: Paths | None = None) -> FastAPI:
 
     app = FastAPI(title="Data Underneath", lifespan=lifespan)
     app.state.st = State(paths)
-    build_meta = json.loads(paths.build_meta.read_text()) if paths.build_meta.exists() else {}
+    build_meta = json.loads(paths.build_meta.read_text(encoding="utf-8")) if paths.build_meta.exists() else {}
     app.state.layout = LayoutView(paths, include_holdout=bool(build_meta.get("include_holdout")))
 
     def st() -> State:
@@ -134,7 +134,7 @@ def create_app(paths: Paths | None = None) -> FastAPI:
 
     @app.get("/api/meta")
     def meta() -> dict[str, Any]:
-        build = json.loads(paths.build_meta.read_text()) if paths.build_meta.exists() else {}
+        build = json.loads(paths.build_meta.read_text(encoding="utf-8")) if paths.build_meta.exists() else {}
         n = st().q("SELECT count(*) AS n FROM logs")[0]["n"]
         return {**build, "logs": n}
 

@@ -209,7 +209,7 @@ class NoteCache:
         self.lock = threading.Lock()
 
     def _load(self) -> dict[str, Any]:
-        return json.loads(self.path.read_text()) if self.path.exists() else {}
+        return json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
 
     def get(self, key: str) -> dict[str, Any] | None:
         with self.lock:
@@ -220,7 +220,7 @@ class NoteCache:
             d = self._load()
             d[key] = value
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(d, indent=1))
+            self.path.write_text(json.dumps(d, indent=1), encoding="utf-8")
 
 
 def note(card: str, data: Any, provider: Provider, cache: NoteCache, *, regenerate: bool = False) -> dict[str, Any]:

@@ -139,5 +139,5 @@ def build_tiles(
         "col": column,
         "page": page,
     }
-    (out_dir / "meta.json").write_text(json.dumps(meta))
+    (out_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
     return meta

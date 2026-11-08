@@ -97,7 +97,7 @@ class Annotation:
 
     @classmethod
     def from_json(cls, path: Path) -> Annotation:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(
             image_name=data["image_name"],
             width=int(data["width"]),

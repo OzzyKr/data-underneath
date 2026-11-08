@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import resource
 import sys
 import time
 import traceback
@@ -42,7 +41,27 @@ DEFAULT_PX_PER_FT = 10.0  # only used for block sizes when neither OCR nor filen
 
 
 def peak_rss_mb() -> float:
-    """Peak resident memory of this process (ru_maxrss is bytes on macOS, KiB on Linux)."""
+    """Peak resident memory of this process (ru_maxrss is bytes on macOS, KiB on Linux; peak working set on Windows)."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class _Counters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+                (n, ctypes.c_size_t)
+                for n in (
+                    "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+                    "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage",
+                )
+            ]  # fmt: skip
+
+        c = _Counters()
+        c.cb = ctypes.sizeof(c)
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb)
+        return c.PeakWorkingSetSize / 1e6
+    import resource
+
     r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return r / 1e6 if sys.platform == "darwin" else r / 1e3
 
@@ -369,7 +388,9 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
     out_dir.mkdir(parents=True, exist_ok=True)
     write_csv(res.intervals, out_dir / f"{doc.doc_id}.csv")
     write_csv(res.intervals, out_dir / "diagnostics" / f"{doc.doc_id}.csv", with_diagnostics=True)
-    (out_dir / "diagnostics" / f"{doc.doc_id}_naming.json").write_text(json.dumps(res.naming, indent=1))
+    (out_dir / "diagnostics" / f"{doc.doc_id}_naming.json").write_text(
+        json.dumps(res.naming, indent=1), encoding="utf-8"
+    )
     legend = [
         {
             "label": e.label,
@@ -381,9 +402,11 @@ def write_outputs(doc: Document, res: DocumentResult, out_dir: Path, cfg: Config
         }
         for e in res.legend
     ]
-    (out_dir / "diagnostics" / f"{doc.doc_id}_legend.json").write_text(json.dumps(legend, indent=1))
+    (out_dir / "diagnostics" / f"{doc.doc_id}_legend.json").write_text(json.dumps(legend, indent=1), encoding="utf-8")
     if res.layout:
-        (out_dir / "diagnostics" / f"{doc.doc_id}_layout.json").write_text(json.dumps(res.layout, indent=1))
+        (out_dir / "diagnostics" / f"{doc.doc_id}_layout.json").write_text(
+            json.dumps(res.layout, indent=1), encoding="utf-8"
+        )
     if image and res.boxes is not None:
         img = open_image(doc.image_path)
         title = f"{doc.doc_id}  |  {len(res.intervals)} intervals"

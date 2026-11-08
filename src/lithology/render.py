@@ -33,7 +33,7 @@ def write_csv(intervals: Iterable[Interval], path: Path, *, with_diagnostics: bo
     """Write the submission CSV (organisers' column order). Diagnostics add confidence and notes."""
     cols = list(CSV_COLUMNS) + (["confidence", "notes", "status", "alternatives"] if with_diagnostics else [])
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for iv in intervals:
@@ -49,7 +49,7 @@ def write_csv(intervals: Iterable[Interval], path: Path, *, with_diagnostics: bo
 def read_csv(path: Path) -> list[Interval]:
     """Read a results or label CSV. Accepts ``bottom_depth`` or ``base_depth``; cluster_id is optional."""
     out = []
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
             bottom = r.get("bottom_depth", r.get("base_depth"))
             cid = (r.get("cluster_id") or "").strip()

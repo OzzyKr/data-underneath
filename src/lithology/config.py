@@ -187,9 +187,9 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 
 def load_config(path: Path | None = None, overrides: dict[str, Any] | None = None) -> Config:
     """Load the default config, then an optional override file, then optional in-code overrides."""
-    data = yaml.safe_load(DEFAULT_CONFIG.read_text())
+    data = yaml.safe_load(DEFAULT_CONFIG.read_text(encoding="utf-8"))
     if path is not None and Path(path).resolve() != DEFAULT_CONFIG:
-        data = _merge(data, yaml.safe_load(Path(path).read_text()) or {})
+        data = _merge(data, yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {})
     if overrides:
         data = _merge(data, overrides)
     return _build(Config, data, "")

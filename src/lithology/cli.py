@@ -194,11 +194,11 @@ def run_batch(
 
 def cmd_run(a: argparse.Namespace) -> int:
     if getattr(a, "detect_boxes", False):  # workers load the config from a path: write the override beside the output
-        base = (yaml.safe_load(Path(a.config).read_text()) if a.config else {}) or {}
+        base = (yaml.safe_load(Path(a.config).read_text(encoding="utf-8")) if a.config else {}) or {}
         base.setdefault("layout", {})["source"] = "detect"
         Path(a.out).mkdir(parents=True, exist_ok=True)
         forced = Path(a.out) / "_config_detect_boxes.yaml"
-        forced.write_text(yaml.safe_dump(base))
+        forced.write_text(yaml.safe_dump(base), encoding="utf-8")
         a.config = str(forced)
     cfg = load_config(Path(a.config) if a.config else None)
     docs = _docs_from(a.inputs)
@@ -233,7 +233,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     est = [estimate_peak_mb(d) for d in docs]
     rows = run_batch(jobs, est, workers, cfg.runtime.memory_budget_mb, on_row=report)
     wall = time.perf_counter() - t0
-    with open(out / "run_summary.csv", "w", newline="") as f:
+    with open(out / "run_summary.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
@@ -254,7 +254,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "workers": workers,
         "memory_budget_mb": cfg.runtime.memory_budget_mb,
     }
-    (out / "run_meta.json").write_text(json.dumps(meta, indent=2))
+    (out / "run_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     log.info(
         "done: %d docs, %d errors, %.1fs wall, %.2fs/doc mean, peak %.0f MB",
         len(rows),
@@ -270,7 +270,7 @@ def _labels_manifest(labels_dir: Path) -> dict[str, str]:
     m = labels_dir / "manifest.yaml"
     if not m.exists():
         return {}
-    data = yaml.safe_load(m.read_text()) or {}
+    data = yaml.safe_load(m.read_text(encoding="utf-8")) or {}
     return {str(k): str(v) for k, v in (data.get("split") or {}).items()}
 
 
@@ -319,7 +319,7 @@ def cmd_eval(a: argparse.Namespace) -> int:
     }
     new = not log_path.exists()
     log_path.parent.mkdir(exist_ok=True)
-    with open(log_path, "a", newline="") as f:
+    with open(log_path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(row))
         if new:
             w.writeheader()
@@ -338,9 +338,9 @@ def cmd_audit(a: argparse.Namespace) -> int:
         if not pf.exists():
             log.warning("missing prediction for %s", af.stem)
             continue
-        with open(af, newline="") as f:
+        with open(af, newline="", encoding="utf-8") as f:
             audit = list(csv.DictReader(f))
-        with open(pf, newline="") as f:
+        with open(pf, newline="", encoding="utf-8") as f:
             pred = list(csv.DictReader(f))
         s = score_audit(pred, audit)
         keys = ("n", "correct", "flagged", "confident_wrong")
@@ -363,7 +363,7 @@ def cmd_audit(a: argparse.Namespace) -> int:
     )
     log_path = REPO / "eval" / "audit_log.csv"
     new = not log_path.exists()
-    with open(log_path, "a", newline="") as f:
+    with open(log_path, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if new:
             w.writerow(
@@ -441,7 +441,8 @@ def cmd_check_data(a: argparse.Namespace) -> int:
             {"documents": len(disc.documents), "skipped": [p.name for p, _ in disc.skipped], "sha256": files},
             indent=2,
             sort_keys=True,
-        )
+        ),
+        encoding="utf-8",
     )
     log.info(
         "%d documents, %d skipped, %d problems; manifest written to %s",
@@ -457,7 +458,7 @@ def cmd_labels_make(a: argparse.Namespace) -> int:
     from lithology.labelkit import is_edited, make_item, save_manifest
 
     cfg = load_config(Path(a.config) if a.config else None)
-    sel = yaml.safe_load(Path(a.selection).read_text())["documents"]
+    sel = yaml.safe_load(Path(a.selection).read_text(encoding="utf-8"))["documents"]
     docs = discover(Path(a.images)).documents
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -466,7 +467,7 @@ def cmd_labels_make(a: argparse.Namespace) -> int:
     if (out / "kit.json").exists():
         from lithology.labelkit import KitItem
 
-        existing = {d["key"]: KitItem(**d) for d in json.loads((out / "kit.json").read_text())}
+        existing = {d["key"]: KitItem(**d) for d in json.loads((out / "kit.json").read_text(encoding="utf-8"))}
     if only and not only <= {s["key"] for s in sel}:
         log.error("unknown keys in --only: %s", sorted(only - {s["key"] for s in sel}))
         return 2
@@ -586,8 +587,10 @@ def cmd_layout(a: argparse.Namespace) -> int:
         docs = [d for d in docs if any(o in d.doc_id for o in a.only.split(","))]
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    vend = (yaml.safe_load((REPO / "eval" / "layout_vendors.yaml").read_text()) or {}).get("vendors", {})
-    sel = yaml.safe_load((REPO / "labels" / "selection.yaml").read_text()) or {}
+    vend = (yaml.safe_load((REPO / "eval" / "layout_vendors.yaml").read_text(encoding="utf-8")) or {}).get(
+        "vendors", {}
+    )
+    sel = yaml.safe_load((REPO / "labels" / "selection.yaml").read_text(encoding="utf-8")) or {}
     holdout = [d["prefix"] for d in sel.get("documents", []) if d.get("split") == "holdout"]
     rows = []
     for d in docs:
@@ -619,7 +622,7 @@ def cmd_layout(a: argparse.Namespace) -> int:
                 row[f"iou_{k}"] = row[f"oracle3_{k}"] = ""
         rows.append(row)
         record = {"boxes": pred, "confidence": lay.confidence, "diagnostics": lay.diagnostics, **row}
-        (out / f"{d.doc_id}_layout.json").write_text(json.dumps(record, indent=1, default=str))
+        (out / f"{d.doc_id}_layout.json").write_text(json.dumps(record, indent=1, default=str), encoding="utf-8")
         if not a.no_images:  # page preview: detected boxes (thick), annotated boxes (thin black)
             W, H = img.size
             s = min(1.0, 3000.0 / H, 1600.0 / W)
@@ -657,7 +660,7 @@ def cmd_layout(a: argparse.Namespace) -> int:
         )
     if not rows:
         return 2
-    with open(out / "layout_summary.csv", "w", newline="") as f:
+    with open(out / "layout_summary.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
@@ -693,7 +696,7 @@ def cmd_layout(a: argparse.Namespace) -> int:
                 "conf_auroc": round(auroc, 3) if auroc is not None else None,
             }
         summary[split] = part
-    (out / "layout_summary.json").write_text(json.dumps(summary, indent=2))
+    (out / "layout_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     log.info("layout summary: %s", json.dumps(summary))
     return 0
 

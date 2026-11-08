@@ -70,7 +70,7 @@ class LayoutView:
         self.lock = threading.Lock()
         self.rows: dict[str, dict[str, Any]] = {}
         if self.run:
-            for r in csv.DictReader((self.run / "layout_summary.csv").open()):
+            for r in csv.DictReader((self.run / "layout_summary.csv").open(encoding="utf-8")):
                 if r["split"] == "holdout" and not include_holdout:
                     continue
                 self.rows[r["doc_id"]] = {
@@ -89,7 +89,7 @@ class LayoutView:
     def summary(self) -> dict[str, Any]:
         if not self.run:
             return {"run": None, "pages": [], "metrics": None}
-        s = json.loads((self.run / "layout_summary.json").read_text())
+        s = json.loads((self.run / "layout_summary.json").read_text(encoding="utf-8"))
         metrics = {"dev": s.get("dev")}
         if self.include_holdout:
             metrics["holdout"] = s.get("holdout")
@@ -108,7 +108,7 @@ class LayoutView:
         row = self.rows.get(doc_id)
         if row is None or not self.run:
             return None
-        res = json.loads((self.run / f"{doc_id}_layout.json").read_text())
+        res = json.loads((self.run / f"{doc_id}_layout.json").read_text(encoding="utf-8"))
         doc = self.docs.get(doc_id)
         ann = doc.annotation() if doc else None
         img = open_image(doc.image_path) if doc else None
