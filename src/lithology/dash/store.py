@@ -21,6 +21,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 import yaml
+from PIL import Image
 
 from lithology.dash.paths import Paths
 from lithology.dash.rocks import CHROMA_MIN, SIMILAR, UNRESOLVED, display_name, log_colours, rock_family
@@ -37,7 +38,7 @@ CREATE TABLE logs (
   n_intervals INTEGER, n_rocks INTEGER, n_unresolved INTEGER, mean_confidence DOUBLE, px_per_ft DOUBLE,
   scale_points INTEGER, scale_confidence DOUBLE, seconds DOUBLE, peak_rss_mb DOUBLE, timings VARCHAR,
   warnings VARCHAR, image_w INTEGER, image_h INTEGER, boxes VARCHAR, tiles VARCHAR, image_path VARCHAR,
-  added VARCHAR
+  added VARCHAR, boxes_source VARCHAR
 );
 CREATE TABLE intervals (
   log_id VARCHAR, idx INTEGER, top_depth DOUBLE, bottom_depth DOUBLE, thickness_ft DOUBLE, top_y INTEGER,
@@ -245,7 +246,7 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
         for n in naming
     ]
 
-    ann = Annotation.from_json(src.ann_path) if src.ann_path and src.ann_path.exists() else None
+    boxes, size = used_boxes(src)
     tiles_meta = tiles_root / lid / "meta.json"
     s = summary or {}
     rock_rows = intervals[~intervals["unresolved"] & ~intervals["lookalike"]]
@@ -275,14 +276,41 @@ def load_doc(src: Source, summary: dict[str, str] | None, unresolved_label: str,
         "peak_rss_mb": _num(s.get("peak_rss_mb")),
         "timings": s.get("timings") or None,
         "warnings": s.get("warnings") or None,
-        "image_w": ann.width if ann else None,
-        "image_h": ann.height if ann else None,
-        "boxes": json.dumps(ann.boxes.to_dict()) if ann else None,
+        "image_w": size[0] if size else None,
+        "image_h": size[1] if size else None,
+        "boxes": json.dumps(boxes) if boxes else None,
         "tiles": tiles_meta.read_text() if tiles_meta.exists() else None,
         "image_path": str(src.image_path) if src.image_path else None,
         "added": dt.datetime.now().isoformat(timespec="seconds"),
+        "boxes_source": _boxes_source(src),
     }
     return {"log": row, "intervals": intervals, "legend": pd.DataFrame(leg_rows), "naming": pd.DataFrame(naming_rows)}
+
+
+def used_boxes(src: Source) -> tuple[dict | None, tuple[int, int] | None]:
+    """The boxes the run actually used and the image size: the layout detector's (diagnostics) when it found them,
+    else the box file's."""
+    lp = src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json"
+    try:
+        lay = json.loads(lp.read_text())
+    except (OSError, ValueError):
+        lay = {}
+    if lay.get("source") == "detected" and lay.get("boxes") and src.image_path and src.image_path.exists():
+        with Image.open(src.image_path) as im:
+            return lay["boxes"], im.size
+    if src.ann_path and src.ann_path.exists():
+        ann = Annotation.from_json(src.ann_path)
+        return ann.boxes.to_dict(), (ann.width, ann.height)
+    return None, None
+
+
+def _boxes_source(src: Source) -> str:
+    """Where the run's boxes came from: "detector" (the layout detector) or "json" (a box file)."""
+    lp = src.out_dir / "diagnostics" / f"{src.doc_id}_layout.json"
+    try:
+        return "detector" if json.loads(lp.read_text()).get("source") == "detected" else "json"
+    except (OSError, ValueError):
+        return "json"  # runs from before the layout step always used the organisers' boxes
 
 
 def _insert(con: duckdb.DuckDBPyConnection, table: str, df: pd.DataFrame) -> None:
@@ -353,11 +381,13 @@ def _tile_job(args: tuple[str, str, dict, list, str]) -> tuple[str, str | None]:
 
 
 def tile_args(src: Source, paths: Paths) -> tuple[str, str, dict, list, str] | None:
-    if not (src.image_path and src.ann_path and src.image_path.exists() and src.ann_path.exists()):
+    if not (src.image_path and src.image_path.exists()):
+        return None
+    boxes, _ = used_boxes(src)
+    if boxes is None:
         return None
     lp = src.out_dir / "diagnostics" / f"{src.doc_id}_legend.json"
     legend = json.loads(lp.read_text()) if lp.exists() else []
-    boxes = json.loads(src.ann_path.read_text())["bounding_boxes"]
     return src.log_id, str(src.image_path), boxes, legend, str(paths.tiles / src.log_id)
 
 

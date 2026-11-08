@@ -122,9 +122,9 @@ def process(
 
 
 def _layout_step(doc: Document, img, cfg: Config, boxes: DocumentBoxes | None) -> tuple[DocumentBoxes, dict]:
-    """Step 1. Boxes passed in by the caller win; ``layout.source: annotation`` uses the organisers' file when it
-    exists (A/B comparison only); otherwise the detector finds the boxes. An annotation, when present, is only used
-    to record how well the detected boxes match it."""
+    """Step 1. Boxes passed in by the caller win; ``layout.source: annotation`` (default) uses the box file when it
+    exists; otherwise (no box file, or ``source: detect``) the detector finds the boxes, and a box file, when present,
+    is only used to record how well the detected boxes match it."""
     if boxes is not None:
         return boxes, {"source": "supplied"}
     ann = doc.annotation()

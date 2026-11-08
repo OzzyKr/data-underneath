@@ -283,6 +283,9 @@ export default function PageView({ log, intervals, selected, onSelect, fit, spot
                 {r.name}
               </span>
             ))}
+            <span className="text-[11px] text-faint">
+              {log.boxes_source === "detector" ? "found by the layout detector" : "from the box file"}
+            </span>
           </span>
           <span className="absolute" style={{ left: xLabel + 8 }}>
             Beds

@@ -3,11 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, FileJson, FileImage, X } from "lucide-react";
 import { startRun, useRun } from "../api";
+import type { BoxMode, RunBoxes } from "../api";
 import { fmt, memory, seconds } from "../format";
-import { ErrorNote } from "./ui";
+import { ErrorNote, Segmented } from "./ui";
 
 const STEP_LABEL: Record<string, string> = {
   load: "Load image",
+  layout: "Find the three boxes",
   scale: "Read depth scale",
   segment: "Find bed boundaries",
   cluster: "Group similar beds",
@@ -17,14 +19,24 @@ const STEP_LABEL: Record<string, string> = {
   tiles: "Cut scan tiles",
   ingest: "Add to dashboard",
 };
-const ORDER = ["load", "scale", "segment", "cluster", "legend", "assemble", "write", "tiles", "ingest"];
+const ORDER = ["load", "layout", "scale", "segment", "cluster", "legend", "assemble", "write", "tiles", "ingest"];
 const isImage = (f: File) => /\.(tiff?|png|jpe?g)$/i.test(f.name);
+const BOX_MODES: { id: BoxMode; label: string }[] = [
+  { id: "auto", label: "Box file" },
+  { id: "detect", label: "Layout detector" },
+];
+const BOX_NAMES: Record<string, string> = {
+  interpreted_lithology_column: "lithology",
+  lithology_legend: "legend",
+  depth_column: "depth",
+};
 
 export default function RunDrawer({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<File[]>([]);
   const [job, setJob] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [drag, setDrag] = useState(false);
+  const [mode, setMode] = useState<BoxMode>("auto");
   const input = useRef<HTMLInputElement>(null);
   const { data: run } = useRun(job);
   const navigate = useNavigate();
@@ -58,7 +70,7 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
   const go = async () => {
     setError(null);
     try {
-      setJob(await startRun(files));
+      setJob(await startRun(files, boxes ? mode : "auto"));
     } catch (e) {
       setError(e);
     }
@@ -111,9 +123,9 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
                 drag ? "border-select bg-hover" : "border-line-2"
               }`}
             >
-              <span className="text-ink">Drop a scan and its box file</span>
+              <span className="text-ink">Drop a scan</span>
               <span className="text-muted">
-                .tif / .png and .json ·{" "}
+                .tif / .png, box file .json optional ·{" "}
                 <button type="button" onClick={() => input.current?.click()} className="text-ink underline underline-offset-2">
                   browse
                 </button>
@@ -122,8 +134,14 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex flex-col gap-3 text-sm">
               <FileRow icon={<FileImage size={15} />} file={image} empty="No scan yet" />
-              <FileRow icon={<FileJson size={15} />} file={boxes} empty="No box file (fine for a scan from the dataset)" />
+              <FileRow icon={<FileJson size={15} />} file={boxes} empty="No box file: the layout detector finds the boxes" />
             </div>
+            {boxes && (
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-muted">Boxes from</span>
+                <Segmented label="Boxes from" items={BOX_MODES} value={mode} onChange={setMode} tone="bg-panel-2" />
+              </div>
+            )}
             {error != null && <ErrorNote error={error} />}
             <div className="mt-auto flex items-center justify-end gap-2.5">
               <button type="button" onClick={onClose} className="h-10 rounded-lg px-3.5 text-sm text-muted hover:bg-hover hover:text-ink">
@@ -172,10 +190,13 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
             {run?.state === "error" && <ErrorNote error={run.error} />}
             <div className="mt-auto flex flex-col gap-4">
               {run?.state === "done" && (
-                <p className="flex items-center gap-2 text-sm text-muted">
-                  <Check size={15} className="text-[#6fbf7a]" aria-hidden="true" />
-                  Pipeline {seconds(run.pipeline_seconds)} · peak memory {memory(run.peak_rss_mb)}
-                </p>
+                <div className="flex flex-col gap-2">
+                  <p className="flex items-center gap-2 text-sm text-muted">
+                    <Check size={15} className="text-[#6fbf7a]" aria-hidden="true" />
+                    Pipeline {seconds(run.pipeline_seconds)} · peak memory {memory(run.peak_rss_mb)}
+                  </p>
+                  {run.boxes && <BoxesNote boxes={run.boxes} />}
+                </div>
               )}
               <div className="flex items-center gap-2.5">
                 <span className="font-mono text-xs text-faint">{run ? `${fmt(run.elapsed, 1)} s elapsed` : ""}</span>
@@ -203,6 +224,27 @@ export default function RunDrawer({ onClose }: { onClose: () => void }) {
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+function BoxesNote({ boxes }: { boxes: RunBoxes }) {
+  if (boxes.source === "json") return <p className="text-sm text-muted">Boxes from the box file.</p>;
+  const iou = boxes.iou_vs_json;
+  const low = (boxes.low_confidence ?? []).map((k) => BOX_NAMES[k] ?? k);
+  return (
+    <div className="flex flex-col gap-1 text-sm text-muted">
+      <p>Boxes found by the layout detector.</p>
+      {iou && (
+        <p className="text-xs text-faint">
+          Overlap with the box file:{" "}
+          {Object.keys(BOX_NAMES)
+            .filter((k) => iou[k] != null)
+            .map((k) => `${BOX_NAMES[k]} ${fmt(iou[k], 2)}`)
+            .join(", ")}
+        </p>
+      )}
+      {low.length > 0 && <p className="text-xs text-faint">Low confidence: {low.join(", ")}. Check them on the Image page.</p>}
     </div>
   );
 }

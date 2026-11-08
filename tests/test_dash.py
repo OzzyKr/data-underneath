@@ -167,24 +167,50 @@ def test_ask_runs_read_only_sql_and_caches(dash_repo, tmp_path):
     assert offline["cached"] and offline["answer"] == res["answer"]
 
 
-@needs_tesseract
-def test_live_run_adds_a_log(client, dash_repo, synth_doc):
-    img = (dash_repo / "dataset" / "images" / f"{DOC}.tif").read_bytes()
-    bad = client.post("/api/runs", files=[("files", ("other_scan.tif", img, "image/tiff"))])
-    assert bad.status_code == 400  # unknown scan without its box file
-    files = [
-        ("files", ("live_copy.tif", img, "image/tiff")),
-        ("files", ("live_copy.json", json.dumps(synth_doc.annotation).encode(), "application/json")),
-    ]
-    job = client.post("/api/runs", files=files).json()["id"]
+def _wait_run(client, job: str) -> dict:
     deadline = time.time() + 120
     while time.time() < deadline:
         s = client.get(f"/api/runs/{job}").json()
         if s["state"] in ("done", "error"):
-            break
+            return s
         time.sleep(0.5)
+    return s
+
+
+@needs_tesseract
+def test_live_run_adds_a_log(client, dash_repo, synth_doc):
+    img = (dash_repo / "dataset" / "images" / f"{DOC}.tif").read_bytes()
+    bad = client.post("/api/runs", files=[("files", ("x.tif", img, "image/tiff"))], data={"boxes": "guess"})
+    assert bad.status_code == 400  # unknown box mode
+    files = [
+        ("files", ("live_copy.tif", img, "image/tiff")),
+        ("files", ("live_copy.json", json.dumps(synth_doc.annotation).encode(), "application/json")),
+    ]
+    s = _wait_run(client, client.post("/api/runs", files=files).json()["id"])
     assert s["state"] == "done", s
-    assert {"load", "scale", "legend", "tiles"} <= set(s["steps"]) and s["peak_rss_mb"] > 0
+    assert {"load", "layout", "scale", "legend", "tiles"} <= set(s["steps"]) and s["peak_rss_mb"] > 0
+    assert s["boxes"] == {"source": "json"}  # a box file was uploaded: it is used
     logs = client.get("/api/logs").json()
     live = [g for g in logs if g["source"] == "live"]
     assert [g["doc_id"] for g in live] == ["live_copy"] and live[0]["log_id"] == s["log_id"]
+    assert client.get(f"/api/logs/{s['log_id']}").json()["boxes_source"] == "json"
+
+
+@needs_tesseract
+def test_live_run_without_box_file_uses_the_layout_detector(client, dash_repo, synth_doc):
+    img = (dash_repo / "dataset" / "images" / f"{DOC}.tif").read_bytes()
+    s = _wait_run(client, client.post("/api/runs", files=[("files", ("no_boxes.tif", img, "image/tiff"))]).json()["id"])
+    assert s["state"] == "done", s
+    assert s["boxes"]["source"] == "detector" and s["boxes"]["iou_vs_json"] is None
+    detail = client.get(f"/api/logs/{s['log_id']}").json()
+    assert detail["boxes_source"] == "detector" and detail["boxes"]["interpreted_lithology_column"]
+
+    # a box file uploaded but the detector forced: the file only scores the detected boxes
+    files = [
+        ("files", ("forced.tif", img, "image/tiff")),
+        ("files", ("forced.json", json.dumps(synth_doc.annotation).encode(), "application/json")),
+    ]
+    s = _wait_run(client, client.post("/api/runs", files=files, data={"boxes": "detect"}).json()["id"])
+    assert s["state"] == "done", s
+    assert s["boxes"]["source"] == "detector"
+    assert s["boxes"]["iou_vs_json"]["interpreted_lithology_column"] > 0.9

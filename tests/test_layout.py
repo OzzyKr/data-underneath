@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lithology.config import load_config
-from lithology.io import discover
+from lithology.io import Document, discover
 from lithology.layout import detect_boxes
 from lithology.models import DocumentBoxes
 from lithology.pipeline import process
@@ -42,7 +42,8 @@ def test_detects_three_boxes_on_synthetic_logs(kw, cfg):
 
 
 @needs_tesseract
-def test_pipeline_step1_detects_and_reports_iou(synth_dataset, cfg):
+def test_pipeline_step1_detects_and_reports_iou(synth_dataset):
+    cfg = load_config(overrides={"layout": {"source": "detect"}})
     doc = discover(synth_dataset / "images").documents[0]
     res = process(doc, cfg)
     assert res.ok, res.error
@@ -51,13 +52,21 @@ def test_pipeline_step1_detects_and_reports_iou(synth_dataset, cfg):
 
 
 @needs_tesseract
-def test_pipeline_can_use_annotation_for_ab_comparison(synth_dataset, synth_doc):
-    cfg = load_config(overrides={"layout": {"source": "annotation"}})
+def test_pipeline_uses_the_box_file_first(synth_dataset, synth_doc, cfg):
     doc = discover(synth_dataset / "images").documents[0]
-    res = process(doc, cfg)
+    res = process(doc, cfg)  # default config: the box file when one exists
     assert res.ok, res.error
     assert res.layout["source"] == "annotation"
     assert res.boxes == DocumentBoxes.from_dict(synth_doc.annotation["bounding_boxes"])
+
+
+@needs_tesseract
+def test_pipeline_detects_when_there_is_no_box_file(synth_dataset, cfg):
+    d = discover(synth_dataset / "images").documents[0]
+    res = process(Document(d.doc_id, d.image_path, None), cfg)
+    assert res.ok, res.error
+    assert res.layout["source"] == "detected"
+    assert "iou_vs_annotation" not in res.layout
 
 
 def test_layout_source_must_be_known():

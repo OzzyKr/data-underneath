@@ -66,3 +66,33 @@ export function Spinner() {
 export function ErrorNote({ error }: { error: unknown }) {
   return <p className="text-sm text-rose">{error instanceof Error ? error.message : String(error)}</p>;
 }
+
+export function Segmented<T extends string | number>({
+  label,
+  items,
+  value,
+  onChange,
+  tone = "bg-panel",
+}: {
+  label: string;
+  items: { id: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  tone?: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className={`flex rounded-lg p-[3px] ${tone}`}>
+      {items.map((it) => (
+        <button
+          key={String(it.id)}
+          type="button"
+          aria-pressed={value === it.id}
+          onClick={() => onChange(it.id)}
+          className={`h-8 rounded-md px-3 text-xs transition-colors ${value === it.id ? "bg-line-2 text-ink" : "text-muted hover:text-ink"}`}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}

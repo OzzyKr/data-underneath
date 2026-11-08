@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -253,10 +253,12 @@ def create_app(paths: Paths | None = None) -> FastAPI:
     # ---------------------------------------------------------------- live runs
 
     @app.post("/api/runs")
-    async def start_run(files: list[UploadFile]) -> dict[str, Any]:
+    async def start_run(files: list[UploadFile], boxes: str = Form("auto")) -> dict[str, Any]:
+        """One scan, plus its box file (.json) if there is one. boxes: "auto" (the box file when uploaded, else the
+        layout detector) or "detect" (always the detector)."""
         data = [(f.filename or "upload", await f.read()) for f in files]
         try:
-            job_id = st().jobs.submit(data)
+            job_id = st().jobs.submit(data, boxes)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"id": job_id}

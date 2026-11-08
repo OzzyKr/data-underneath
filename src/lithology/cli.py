@@ -195,13 +195,11 @@ def run_batch(
 
 
 def cmd_run(a: argparse.Namespace) -> int:
-    if getattr(
-        a, "use_annotations", False
-    ):  # workers load the config from a path: write the override beside the output
+    if getattr(a, "detect_boxes", False):  # workers load the config from a path: write the override beside the output
         base = (yaml.safe_load(Path(a.config).read_text()) if a.config else {}) or {}
-        base.setdefault("layout", {})["source"] = "annotation"
+        base.setdefault("layout", {})["source"] = "detect"
         Path(a.out).mkdir(parents=True, exist_ok=True)
-        forced = Path(a.out) / "_config_use_annotations.yaml"
+        forced = Path(a.out) / "_config_detect_boxes.yaml"
         forced.write_text(yaml.safe_dump(base))
         a.config = str(forced)
     cfg = load_config(Path(a.config) if a.config else None)
@@ -715,7 +713,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument(
         "--detect-boxes",
         action="store_true",
-        help="ignore annotation files and detect the three boxes (bonus; for end-to-end evaluation)",
+        help="ignore box files and detect the three boxes (bonus; end-to-end A/B). Default: box file first",
     )
     r.set_defaults(fn=cmd_run)
 

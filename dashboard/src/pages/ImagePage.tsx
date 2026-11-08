@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useIntervals, useLog, type Interval, type LogDetail } from "../api";
 import { fmt, rememberLog } from "../format";
-import { Dot, ErrorNote, bedName } from "../components/ui";
+import { Dot, ErrorNote, Segmented, bedName } from "../components/ui";
 import StripLog, { type Span } from "../viewer/StripLog";
 import PageView, { type Fit } from "../viewer/PageView";
 
@@ -24,24 +24,6 @@ const FITS: { id: Fit; label: string }[] = [
   { id: "width", label: "Fit width" },
   { id: "page", label: "Fit page" },
 ];
-
-function Segmented<T extends string | number>({ label, items, value, onChange }: { label: string; items: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
-  return (
-    <div role="group" aria-label={label} className="flex rounded-lg bg-panel p-[3px]">
-      {items.map((it) => (
-        <button
-          key={String(it.id)}
-          type="button"
-          aria-pressed={value === it.id}
-          onClick={() => onChange(it.id)}
-          className={`h-8 rounded-md px-3 text-xs transition-colors ${value === it.id ? "bg-line-2 text-ink" : "text-muted hover:text-ink"}`}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function ImagePage() {
   const { logId } = useParams();

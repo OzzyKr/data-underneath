@@ -7,6 +7,9 @@ and `lith eval --pred out --labels labels --split dev`. Plans: `~/.claude/plans/
 ## Decisions
 - Engineering-first: classical CV + OCR, deterministic, laptop CPU, every threshold in `config/default.yaml` (ft, not px).
 - AI only where classical can't decide: tier 2 = frozen ResNet-18 second opinion, asked only for open groups.
+- Boxes (step 1, `src/lithology/layout.py`, teammate's layout detector): **box file first, detector when there is none**
+  (`layout.source: annotation`, decided 2026-11-08); `lith run --detect-boxes` forces the detector (A/B). Example log06
+  with no box file: named right 82% (box file 83.5%), boundary F1 0.73 (0.85), ARI 0.83 (0.90), depth MAE 0.11 ft.
 - Naming opinions: pixel template (two-way) · classical · pretrained · stroke shapes (port of a teammate's prototype).
 - **CSV always gets a legend name** (`naming.abstain: false`, decided 2026-11-07): Viridien ranks on correctness and
   "Unresolved" always scores wrong. Honesty lives in the diagnostics: `confidence`, `notes`, and `status`:
@@ -71,7 +74,9 @@ Eye-audit spot labels: `labels/audit/<doc>.csv` (windows mid-bed); score with `l
 ## Dashboard (Stage 2)
 - `make dash-data` then `make dash` -> http://127.0.0.1:8000. Pages: CSV, Image (Column = lithology column + depth ruler + labelled beds, zoom lands on the selected bed;
   Original scan = the uncropped page, true to scale, spotlighting the three regions read, beds labelled), Insights
-  (fixed-SQL charts, AI notes, Ask the data with visible SQL), Run a scan (live pipeline run, ~9 s for log06).
+  (fixed-SQL charts, AI notes, Ask the data with visible SQL), Run a scan (live pipeline run, ~9 s for log06; the box file is optional: without one the layout detector finds
+  the boxes, with one a "Box file / Layout detector" switch picks; the result and the Original scan say which was used),
+  Layout (the detector's scores per box vs the organisers' boxes).
 - Back end `src/lithology/dash/` (store/tiles/insights/ai/jobs/app), front end `dashboard/` (Vite + React + Tailwind).
 - Holdout logs are hidden unless `lith dash-build --all` (`make dash-demo`) - only for the final demo.
 - AI provider switch: `.env` (`.env.example`); offline mode serves cached notes/answers - ask the demo questions

@@ -17,3 +17,4 @@ timestamp,commit,config_hash,data_hash,split,note,n_docs,labelled_ft,lithology_a
 2026-11-07T21:25:39,b17de96-dirty,d33ac173a4ce,1ae115030da8,dev,snap edges + end-of-column guard,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-07T21:53:02,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,trial: colour veto + bed-level exact match,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
 2026-11-07T21:58:46,fda5663-dirty,d33ac173a4ce,1ae115030da8,dev,colour veto,1.0,300.0,0.8347,0.9674,0.0,0.8235,0.875,0.8485,0.1161,0.902
+2026-11-08T09:03:31,3c2e53e-dirty,b8572e77e97b,1ae115030da8,dev,example with no box file: layout detector boxes,1.0,300.0,0.822,0.9143,0.0,0.7059,0.75,0.7273,0.1142,0.8271

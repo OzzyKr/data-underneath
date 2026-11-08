@@ -71,6 +71,7 @@ export type LogDetail = LogSummary & {
   image_w: number | null;
   image_h: number | null;
   boxes: Boxes | null;
+  boxes_source?: "json" | "detector" | null;
   tiles: Tiles | null;
   rocks: Rock[];
   legend: LegendEntry[];
@@ -132,6 +133,16 @@ export type Answer = {
 export type ProviderInfo = { name: string; label: string; available: boolean; model: string | null; reason: string };
 export type AiStatus = { active: string; model: string | null; providers: ProviderInfo[] };
 
+/** Where a run's three boxes came from: the uploaded box file, or the layout detector (with its confidence and, when a
+ * box file was uploaded too, how well the detected boxes overlap it). */
+export type RunBoxes = {
+  source: "json" | "detector";
+  confidence?: Record<string, number>;
+  low_confidence?: string[];
+  iou_vs_json?: Record<string, number> | null;
+};
+export type BoxMode = "auto" | "detect";
+
 export type RunStatus = {
   id: string;
   doc_id: string;
@@ -143,6 +154,7 @@ export type RunStatus = {
   pipeline_seconds: number | null;
   peak_rss_mb: number | null;
   size: [number, number] | null;
+  boxes: RunBoxes | null;
   log_id: string | null;
   error: string | null;
 };
@@ -204,9 +216,10 @@ export function useRegenerateNotes(corr: string[] | null) {
 
 export const useAsk = () => useMutation({ mutationFn: (question: string) => post<Answer>("/api/ask", { question }) });
 
-export async function startRun(files: File[]): Promise<string> {
+export async function startRun(files: File[], boxes: BoxMode = "auto"): Promise<string> {
   const fd = new FormData();
   files.forEach((f) => fd.append("files", f, f.name));
+  fd.append("boxes", boxes);
   const r = await request<{ id: string }>("/api/runs", { method: "POST", body: fd });
   return r.id;
 }

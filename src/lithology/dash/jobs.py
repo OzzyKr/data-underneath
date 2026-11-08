@@ -2,6 +2,9 @@
 
 The pipeline runs in its own process (one at a time, like a batch worker), reporting each step to a small status
 file; results land in ``out_live/`` and are added to the dashboard database when the run finishes.
+
+Where the three boxes come from: the uploaded box file (.json) when there is one, the layout detector when there is
+not. ``boxes="detect"`` runs the detector even when a box file was uploaded (the file then only scores the detector).
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ SUMMARY_FIELDS = [
     "peak_rss_mb", "timings", "warnings",
 ]  # fmt: skip
 IMAGE_EXT = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+BOX_MODES = ("auto", "detect")  # auto: the box file when uploaded, else the detector; detect: always the detector
 
 
 def _write_status(path: Path, **kw: Any) -> None:
@@ -41,8 +45,12 @@ def _write_status(path: Path, **kw: Any) -> None:
     tmp.replace(path)
 
 
-def run_live(doc_id: str, image: str, ann: str, out_dir: str, status: str, tiles_dir: str) -> dict[str, Any]:
-    """Worker process: pipeline + outputs + tiles for one uploaded scan. Mirrors ``cli._run_one``."""
+def run_live(
+    doc_id: str, image: str, ann: str | None, out_dir: str, status: str, tiles_dir: str, detect: bool = False
+) -> dict[str, Any]:
+    """Worker process: pipeline + outputs + tiles for one uploaded scan. Mirrors ``cli._run_one``.
+
+    ``ann`` is the uploaded box file (None: the detector finds the boxes); ``detect`` forces the detector."""
     from lithology.config import load_config
     from lithology.dash.tiles import build_tiles
     from lithology.io import Document
@@ -60,8 +68,8 @@ def run_live(doc_id: str, image: str, ann: str, out_dir: str, status: str, tiles
         _write_status(st, state="running", step=name, steps=done)
 
     t0 = time.perf_counter()
-    cfg = load_config()
-    doc = Document(doc_id, Path(image), Path(ann))
+    cfg = load_config(overrides={"layout": {"source": "detect"}} if detect else None)
+    doc = Document(doc_id, Path(image), Path(ann) if ann else None)
     res = process(doc, cfg, on_step=on_step)
     for prev, t in started.items():
         done.setdefault(prev, round(time.perf_counter() - t, 2))
@@ -69,6 +77,7 @@ def run_live(doc_id: str, image: str, ann: str, out_dir: str, status: str, tiles
         _write_status(st, state="error", error=res.error, steps=done)
         return {"ok": False, "error": res.error}
     pipeline_s = round(time.perf_counter() - t0, 2)
+    boxes = _boxes_report(res.layout)
 
     _write_status(st, step="write", steps=done)
     t = time.perf_counter()
@@ -98,21 +107,47 @@ def run_live(doc_id: str, image: str, ann: str, out_dir: str, status: str, tiles
         w = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS)
         w.writeheader()
         w.writerows(rows)
+    # the boxes the run actually used, in the organisers' format: the dashboard draws and tiles from this file
+    with Image.open(image) as im:
+        w, h = im.size
+    used = Path(image).with_name(f"{doc_id}.boxes.json")
+    used.write_text(
+        json.dumps({"image_name": Path(image).name, "width": w, "height": h, "bounding_boxes": res.boxes.to_dict()})
+    )
     reg = out / "sources.json"
     sources = json.loads(reg.read_text()) if reg.exists() else {}
-    sources[doc_id] = {"image": image, "ann": ann}
+    sources[doc_id] = {"image": image, "ann": str(used), "uploaded_ann": ann, "boxes_source": boxes["source"]}
     reg.write_text(json.dumps(sources, indent=1))
     done["write"] = round(time.perf_counter() - t, 2)
 
     _write_status(st, step="tiles", steps=done)
     t = time.perf_counter()
     legend = json.loads((out / "diagnostics" / f"{doc_id}_legend.json").read_text())
-    build_tiles(Path(image), Annotation.from_json(Path(ann)).boxes, legend, Path(tiles_dir))
+    build_tiles(Path(image), res.boxes, legend, Path(tiles_dir))
     done["tiles"] = round(time.perf_counter() - t, 2)
     _write_status(
-        st, state="ingesting", step="ingest", steps=done, pipeline_seconds=pipeline_s, peak_rss_mb=res.peak_rss_mb
+        st,
+        state="ingesting",
+        step="ingest",
+        steps=done,
+        pipeline_seconds=pipeline_s,
+        peak_rss_mb=res.peak_rss_mb,
+        boxes=boxes,
     )
     return {"ok": True, "row": {k: str(v) for k, v in row.items()}}
+
+
+def _boxes_report(layout: dict[str, Any]) -> dict[str, Any]:
+    """Where the run's boxes came from, for the dashboard: "json" (the box file) or "detector" (+ its confidence and,
+    when a box file was uploaded too, how well the detected boxes overlap it)."""
+    if layout.get("source") != "detected":
+        return {"source": "json"}
+    return {
+        "source": "detector",
+        "confidence": layout.get("confidence", {}),
+        "low_confidence": layout.get("low_confidence", []),
+        "iou_vs_json": layout.get("iou_vs_annotation"),
+    }
 
 
 class Jobs:
@@ -123,7 +158,11 @@ class Jobs:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.lock = threading.Lock()
 
-    def submit(self, files: list[tuple[str, bytes]]) -> str:
+    def submit(self, files: list[tuple[str, bytes]], boxes: str = "auto") -> str:
+        """Queue one scan. ``boxes``: "auto" uses the box file when one is uploaded and the layout detector when
+        not; "detect" always uses the detector."""
+        if boxes not in BOX_MODES:
+            raise ValueError(f"boxes must be one of {', '.join(BOX_MODES)}")
         images = [(n, b) for n, b in files if Path(n).suffix.lower() in IMAGE_EXT]
         jsons = [(n, b) for n, b in files if Path(n).suffix.lower() == ".json"]
         if len(images) != 1:
@@ -136,27 +175,23 @@ class Jobs:
         safe = re.sub(r"[/\\]", "_", Path(img_name).name)
         img_path = folder / safe
         img_path.write_bytes(img_bytes)
-        if jsons:
-            ann_path = folder / f"{doc_id}.json"
-            ann_path.write_bytes(jsons[0][1])
-        else:  # the organisers' boxes, when the scan is one of the dataset's
-            known = self.paths.annotations / f"{doc_id}.json"
-            if not known.exists():
-                raise ValueError(
-                    "this scan needs its bounding-box file (.json): automatic box detection is not built yet"
-                )
-            ann_path = known
-        try:
-            ann = Annotation.from_json(ann_path)
-        except Exception as e:
-            raise ValueError(f"the .json is not a bounding-box file: {e}") from e
         try:
             with Image.open(img_path) as im:
                 size = im.size
         except Exception as e:
             raise ValueError(f"cannot read the scan: {e}") from e
-        if size != (ann.width, ann.height):
-            raise ValueError(f"the boxes are for a {ann.width}x{ann.height} image but the scan is {size[0]}x{size[1]}")
+        ann_path: Path | None = None  # no box file: the layout detector finds the boxes
+        if jsons:
+            ann_path = folder / f"{doc_id}.json"
+            ann_path.write_bytes(jsons[0][1])
+            try:
+                ann = Annotation.from_json(ann_path)
+            except Exception as e:
+                raise ValueError(f"the .json is not a bounding-box file: {e}") from e
+            if size != (ann.width, ann.height):
+                raise ValueError(
+                    f"the boxes are for a {ann.width}x{ann.height} image but the scan is {size[0]}x{size[1]}"
+                )
 
         from lithology.dash.store import slug
 
@@ -169,10 +204,11 @@ class Jobs:
             run_live,
             doc_id,
             str(img_path),
-            str(ann_path),
+            str(ann_path) if ann_path else None,
             str(self.paths.out_live),
             str(status),
             str(self.paths.tiles / slug("live", doc_id)),
+            boxes == "detect",
         )
         fut.add_done_callback(lambda f: self._finished(job_id, f))
         return job_id
@@ -211,6 +247,7 @@ class Jobs:
             "pipeline_seconds": st.get("pipeline_seconds"),
             "peak_rss_mb": st.get("peak_rss_mb"),
             "size": st.get("size"),
+            "boxes": st.get("boxes"),
             "log_id": job["log_id"],
             "error": job["error"] or st.get("error"),
         }
