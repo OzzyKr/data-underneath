@@ -22,6 +22,7 @@ from lithology.io import Document, crop_rgb, image_dpi, open_image
 from lithology.legend import match_distances, read_legend, swatch_colour, swatch_descriptor
 from lithology.models import Box, DocumentBoxes, DocumentResult, Interval
 from lithology.naming import (
+    Naming,
     best_guess,
     classify_flagged,
     decide,
@@ -33,7 +34,7 @@ from lithology.naming import (
 )
 from lithology.render import render_annotated, write_csv
 from lithology.scale import estimate_scale, prior_px_per_ft
-from lithology.segment import core_box_x, interval_descriptors, segment_column
+from lithology.segment import core_box_x, interval_descriptors, segment_column, snap_to_gap
 
 log = logging.getLogger(__name__)
 
@@ -193,6 +194,7 @@ def _process(
         notes: dict[int, str] = {}
         status: dict[int, str] = {}
         alternatives: dict[int, list[str]] = {}
+        paper_ids: set[int] = set()  # groups that are paper or a text box over the column, not beds
         rocks = [e for e in entries if e.is_rock] or entries  # never name a bed after a drilling symbol
         if rocks and len(ids):
             entries = rocks
@@ -220,12 +222,28 @@ def _process(
                         decisions[c] = decide(dist[c], sim[c], cfg.naming, tmpl[c])
                 except Exception as e:  # the second opinion is optional: degrade to classical only
                     res.warnings.append(f"pretrained second opinion unavailable ({type(e).__name__}: {e})")
+            # Colour veto: in a colour legend a confident name must have the bed's fill colour. A white group named
+            # after a coloured swatch is paper or a text box drawn over the column (dropped); any other clash becomes
+            # a flagged guess among swatches of the right colour.
+            sw_fill = np.array([fill_lab(s, cfg.segment.ink_luma) for s in inner])
+            paper: set[int] = set()
+            if np.mean([e.chroma > 15 for e in entries]) >= 0.3:
+                for c, d in enumerate(decisions):
+                    parts = [p for p in patches[c] if p.size]
+                    if d.swatch is None or not parts:
+                        continue
+                    g = np.mean([fill_lab(p, cfg.segment.ink_luma) for p in parts], axis=0)
+                    if np.linalg.norm(g - sw_fill[d.swatch]) <= cfg.naming.colour_gate:
+                        continue
+                    if g[0] > 90 and np.hypot(g[1], g[2]) < 8 and entries[d.swatch].chroma > 15:
+                        paper.add(c)
+                    why = "name contradicts the bed's colour"
+                    decisions[c] = Naming(None, cfg.naming.confidence_unresolved, d.candidates, why)
             # Groups no opinion settled still get a flagged best guess (see lithology.naming.best_guess).
             labels = [e.label for e in entries]
             identical = identical_swatches(inner)
             guesses: dict[int, tuple[int, float, str, bool]] = {}
             bed_colour_ok: dict[int, np.ndarray | None] = {}
-            sw_fill = np.array([fill_lab(s, cfg.segment.ink_luma) for s in inner])
             strokes = np.full((n_clusters, len(entries)), np.nan)
             open_now = [c for c, d in enumerate(decisions) if d.swatch is None]
             if cfg.naming.use_strokes and open_now:
@@ -272,7 +290,9 @@ def _process(
             # Groups the legend calls the same rock become one group (ids agree with names, touching beds merge).
             # Unresolved groups with the same candidates share one id: the same ambiguity is the same pattern.
             key_of = {
-                c: ("rock", d.swatch)
+                c: ("paper", c)
+                if c in paper
+                else ("rock", d.swatch)
                 if d.swatch is not None
                 else (("guess" if guesses[c][3] else "rock"), guesses[c][0])
                 for c, d in enumerate(decisions)
@@ -282,7 +302,7 @@ def _process(
                 new_id.setdefault(key_of[int(c)], len(new_id))
             remap = {c: new_id[key_of[c]] for c in range(n_clusters) if key_of[c] in new_id}
             for c, d in enumerate(decisions):
-                if c not in remap:
+                if c not in remap or c in paper:
                     continue
                 r = remap[c]
                 if d.swatch is not None:
@@ -304,6 +324,9 @@ def _process(
                     continue
                 match_conf[r] = min(match_conf.get(r, 1.0), d.confidence)
             ids = np.array([remap[int(c)] for c in ids])
+            paper_ids = {remap[c] for c in paper if c in remap}
+            if paper_ids:
+                res.warnings.append(f"{len(paper)} group(s) dropped: paper or a text box over the column")
             n_open = sum(d.swatch is None and guesses[c][3] for c, d in enumerate(decisions) if c in remap)
             if n_open:
                 res.warnings.append(f"{n_open} rock group(s) could not be named with confidence")
@@ -313,6 +336,14 @@ def _process(
 
     with _timed(t, "assemble", hook):
         merged = merge_adjacent([s.top for s in filled], [s.bottom for s in filled], ids.tolist())
+        merged = [m for m in merged if m[2] not in paper_ids]
+        if cfg.segment.snap_to_gap:  # final bed edges only: grouping above is unchanged
+            merged = [list(m) for m in merged]
+            for a, b in zip(merged[:-1], merged[1:], strict=True):
+                lo, hi = a[0] + 2, b[1] - 2
+                if a[1] == b[0] and hi > lo:  # touching beds of different groups, not slivers
+                    edge = snap_to_gap(seg.stats, seg.scaler, a[1], seg.block_px, seg.block_px)
+                    a[1] = b[0] = min(max(edge, lo), hi)
         intervals = []
         for top, bottom, c in merged:
             y0, y1 = lc.y0 + top, lc.y0 + bottom

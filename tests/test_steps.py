@@ -392,3 +392,37 @@ def test_flagged_beds_are_similar_types_or_unresolved():
     assert classify_flagged(0, [2], fills, True, 12.0)[0] == "unresolved"
     # the bed does not even have the guess's colour -> unresolved
     assert classify_flagged(0, [1, 3], fills, False, 12.0)[0] == "unresolved"
+
+
+def test_stacked_swatches_one_pixel_apart_stay_separate():
+    """Legends that stack swatches with a 1 px gap (GC297) must give one candidate per swatch, not one tall strip."""
+    import numpy as np
+
+    from lithology.legend import _swatch_candidates
+
+    gray = np.full((560, 300), 255, np.uint8)
+    for k in range(11):  # 11 filled swatches, 45 px tall, 1 px apart: the column is taller than 45% of the legend
+        y = 20 + k * 46
+        gray[y : y + 45, 10:77] = 120
+    boxes = _swatch_candidates(gray, [], min_px=8, content=gray < 200)
+    assert len(boxes) == 11
+    assert all(b.height == 45 and b.width == 67 for b in boxes)
+
+
+def test_snap_to_gap_moves_pattern_edges_into_the_gap_and_survives_column_ends():
+    import numpy as np
+
+    from lithology.features import FeatureScaler, describe_ranges, row_stats
+    from lithology.segment import snap_to_gap
+
+    col = np.full((200, 40, 3), 255, np.uint8)
+    for y in range(0, 100, 20):  # bed A: a dash row every 20 rows
+        col[y + 8 : y + 11, 5:35] = 0
+    for y in range(110, 200, 6):  # bed B: vertical bars, starting at row 110 (gap 91..109)
+        col[y : y + 4, 5:35:6] = 0
+    stats = row_stats(col, 110)
+    starts = np.arange(0, 180, 20)
+    scaler = FeatureScaler.from_blocks(describe_ranges(stats, starts, starts + 20))
+    edge = snap_to_gap(stats, scaler, 92, 20, 20)  # refinement left the edge on A's last dash row
+    assert 95 <= edge <= 108
+    assert snap_to_gap(stats, scaler, 195, 20, 20) == 195  # near the end of the column: unchanged, no crash

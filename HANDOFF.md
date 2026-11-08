@@ -39,7 +39,7 @@ and `lith eval --pred out --labels labels --split dev`. Plans: `~/.claude/plans/
 | Example log06 (b&w), share of depth named right (exact / lenient) | 20% / 33% | 82% / 94% |
 | Example boundaries (±2 ft) / grouping ARI / depth MAE | F1 0.91 / 0.83 / 0.12 ft | unchanged |
 | "Unresolved" or non-rock names in CSVs | 72,000 ft / 263 ft | 0 / 0 |
-| Flagged depth (similar + unresolved): colour / b&w logs | 10% / 92% | 14% / 94% |
+| Flagged depth (similar + unresolved): colour / b&w logs | 10% / 92% | 14% / 92% (GC297 94% → 9% after the stacked-legend fix) |
 | Logs processed | 51/51 | 51/51, 0 errors |
 | Speed / peak memory | 7.4 s/log / 2.9 GB (under-reported) | 9.6 s/log / 3.7 GB (measured after image) |
 
