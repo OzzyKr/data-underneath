@@ -185,3 +185,83 @@ def test_single_rock_log_is_still_chosen(rock, cfg):
     gt = DocumentBoxes.from_dict(doc.annotation["bounding_boxes"])
     res = detect_boxes(doc.image, cfg.layout)
     assert res.boxes.lithology_column.iou(gt.lithology_column) > 0.9
+
+
+# ------------------------------------------------------------------------------------------- the needs-review rule
+
+LOW = {"depth_column": 0.3, "interpreted_lithology_column": 0.9, "lithology_legend": 0.45}
+
+
+def _fake_detector(monkeypatch, boxes: DocumentBoxes, confidence: dict[str, float]) -> list:
+    """Replace the detector with one returning fixed boxes and confidences; returns the list of calls."""
+    from types import SimpleNamespace
+
+    import lithology.layout
+
+    calls: list = []
+
+    def fake(img, cfg):
+        calls.append(cfg)
+        return SimpleNamespace(boxes=boxes, confidence=dict(confidence), diagnostics={})
+
+    monkeypatch.setattr(lithology.layout, "detect_boxes", fake)
+    return calls
+
+
+def test_layout_step_flags_boxes_below_the_review_threshold(monkeypatch, synth_doc, tmp_path):
+    from lithology.io import Document
+    from lithology.pipeline import _layout_step
+
+    gt = DocumentBoxes.from_dict(synth_doc.annotation["bounding_boxes"])
+    _fake_detector(monkeypatch, gt, LOW)
+    doc = Document("lone", tmp_path / "lone.tif", None)  # no annotation: the boxes are detected
+    cfg = load_config()
+    _, info = _layout_step(doc, None, cfg, None)
+    assert info["source"] == "detected"
+    assert info["review_threshold"] == cfg.layout.review_threshold == 0.5
+    assert info["needs_review"] == ["depth_column", "lithology_legend"]
+    assert info["confidence"] == LOW
+    _, info = _layout_step(doc, None, load_config(overrides={"layout": {"review_threshold": 0.2}}), None)
+    assert info["needs_review"] == []  # the threshold comes from the config
+
+
+@needs_tesseract
+def test_pipeline_records_and_warns_about_boxes_needing_review(monkeypatch, synth_dataset, synth_doc, tmp_path, caplog):
+    import json
+    import logging
+    import shutil
+
+    from lithology.pipeline import write_outputs
+
+    gt = DocumentBoxes.from_dict(synth_doc.annotation["bounding_boxes"])
+    _fake_detector(monkeypatch, gt, LOW)
+    src = discover(synth_dataset / "images").documents[0]
+    lone = tmp_path / "no_annotation" / "images"
+    lone.mkdir(parents=True)
+    shutil.copy(src.image_path, lone / src.image_path.name)
+    doc = discover(lone).documents[0]
+    cfg = load_config()
+    with caplog.at_level(logging.WARNING, logger="lithology.pipeline"):
+        res = process(doc, cfg)
+    assert res.ok, res.error
+    assert res.layout["needs_review"] == ["depth_column", "lithology_legend"]
+    assert any("needs review" in w and "depth_column" in w for w in res.warnings)
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING and doc.doc_id in r.getMessage()]
+    assert warned and "lithology_legend" in warned[0].getMessage()
+    out = tmp_path / "out"
+    write_outputs(doc, res, out, cfg, image=False)
+    meta = json.loads((out / "diagnostics" / f"{doc.doc_id}_layout.json").read_text())
+    assert meta["needs_review"] == ["depth_column", "lithology_legend"] and meta["confidence"] == LOW
+    assert (out / f"{doc.doc_id}.csv").read_text().splitlines()[0] == (
+        "top_depth,bottom_depth,lithology,top_y,bottom_y,cluster_id"
+    )  # the interval CSV is unchanged
+
+
+@needs_tesseract
+def test_annotation_runs_are_not_flagged(monkeypatch, synth_dataset):
+    calls = _fake_detector(monkeypatch, DocumentBoxes.from_dict({k: [0, 0, 1, 1] for k in LOW}), LOW)
+    res = process(discover(synth_dataset / "images").documents[0], load_config())
+    assert res.ok, res.error
+    assert not calls  # the annotation was used: the detector never ran
+    assert res.layout == {"source": "annotation"}
+    assert not any("needs review" in w for w in res.warnings)

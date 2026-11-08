@@ -53,6 +53,22 @@ function Pill({ v, label }: { v: number | null | undefined; label: string }) {
   );
 }
 
+const boxLabels = (keys: BoxKey[]) => keys.map((k) => BOXES.find((b) => b.key === k)?.label ?? k).join(", ");
+
+/** A detected box below layout.review_threshold: every box above it was right on dev and holdout, below it some were
+ * wrong, so a person has to check it before its intervals are trusted. */
+function ReviewBadge({ title, children = "Needs review" }: { title?: string; children?: ReactNode }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium text-rose"
+      style={{ backgroundColor: "rgba(227,154,176,0.12)" }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------------------------------------- page
 
 export default function LayoutPage() {
@@ -74,7 +90,7 @@ export default function LayoutPage() {
     return all.filter(
       (r) =>
         (vendor === "all" || r.vendor === vendor) &&
-        (filter === "all" || minIou(r) < 0.8 || BOXES.some((b) => (r.confidence?.[b.key] ?? 1) < 0.5)),
+        (filter === "all" || minIou(r) < 0.8 || r.needs_review.length > 0),
     );
   }, [data, filter, vendor]);
   const vendors = useMemo(() => [...new Set((data?.pages ?? []).map((r) => r.vendor))].sort(), [data]);
@@ -119,6 +135,8 @@ export default function LayoutPage() {
     );
 
   const dev = data.metrics?.dev;
+  const nReview = data.needs_review_pages ?? data.pages.filter((r) => r.needs_review.length > 0).length;
+  const ev = data.review_evidence?.dev;
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8 lg:px-12">
@@ -182,9 +200,9 @@ export default function LayoutPage() {
         </div>
       </section>
 
-      {dev && (
-        <section aria-label="Scores" className="grid grid-cols-2 gap-6 rounded-xl border border-line bg-panel p-5 md:grid-cols-4">
-          {BOXES.map((b) => (
+      {(dev || data.pages.length > 0) && (
+        <section aria-label="Scores" className="grid grid-cols-2 gap-6 rounded-xl border border-line bg-panel p-5 md:grid-cols-3 xl:grid-cols-5">
+          {dev && BOXES.map((b) => (
             <div key={b.key} className="flex flex-col gap-1.5">
               <span className="flex items-center gap-2 text-xs text-faint">
                 <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: b.color }} />
@@ -198,6 +216,22 @@ export default function LayoutPage() {
               </span>
             </div>
           ))}
+          <div className="flex flex-col gap-1.5" title="Pages with a detected box below the review threshold">
+            <span className="text-xs text-faint">Needs review</span>
+            <span className="tabular text-2xl font-medium tracking-tight" style={{ color: nReview ? BAD : GOOD }}>
+              {nReview}
+              <span className="ml-1 text-sm font-normal text-faint">/ {data.pages.length} pages</span>
+            </span>
+            <span className="text-xs text-muted">a box below confidence {data.review_threshold}</span>
+            {ev && (
+              <span
+                className="tabular text-[11px] text-faint"
+                title="Annotated dev pages: flagged boxes that were wrong (IoU < 0.5) vs right, and wrong boxes the rule missed"
+              >
+                dev: flagged {ev.flagged_wrong} wrong · {ev.flagged_right} right · missed {ev.unflagged_wrong}
+              </span>
+            )}
+          </div>
           <Stat
             label="Speed"
             value={data.mean_seconds != null ? `${data.mean_seconds} s/page` : "–"}
@@ -249,6 +283,7 @@ export default function LayoutPage() {
                     onClick={() => navigate(`/layout/${encodeURIComponent(u.id)}`)}
                     title={u.name}
                     sub="your image · no annotation"
+                    review={u.needs_review ?? []}
                   />
                 </li>
               ))}
@@ -259,6 +294,7 @@ export default function LayoutPage() {
                   onClick={() => navigate(`/layout/${encodeURIComponent(r.doc_id)}`)}
                   title={shortTitle(r.doc_id)}
                   sub={r.vendor}
+                  review={r.needs_review}
                   pills={BOXES.map((b) => (
                     <Pill key={b.key} v={r.iou?.[b.key]} label={b.label} />
                   ))}
@@ -279,12 +315,14 @@ function RowButton({
   onClick,
   title,
   sub,
+  review,
   pills,
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   sub: string;
+  review?: BoxKey[];
   pills?: ReactNode;
 }) {
   return (
@@ -300,7 +338,10 @@ function RowButton({
         <span className="truncate text-sm text-ink" title={title}>
           {title}
         </span>
-        <span className="text-[11px] text-faint">{sub}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-faint">
+          {sub}
+          {review && review.length > 0 && <ReviewBadge title={`Low confidence: ${boxLabels(review)}`} />}
+        </span>
       </span>
       {pills && <span className="flex shrink-0 gap-0.5">{pills}</span>}
     </button>
@@ -380,11 +421,21 @@ function Viewer({ d }: { d: LayoutDetail }) {
           const conf = d.confidence?.[b.key];
           const det = d.boxes[b.key];
           const ann = d.annotated?.[b.key];
+          const flagged = d.needs_review.includes(b.key);
           return (
-            <div key={b.key} className="flex flex-col gap-1.5 rounded-lg border border-line bg-panel p-3">
+            <div
+              key={b.key}
+              className="flex flex-col gap-1.5 rounded-lg border border-line bg-panel p-3"
+              style={flagged ? { borderColor: "rgba(227,154,176,0.45)" } : undefined}
+            >
               <span className="flex items-center gap-2 text-xs text-muted">
                 <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: b.color }} />
                 {b.label}
+                {flagged && (
+                  <span className="ml-auto">
+                    <ReviewBadge title={`Confidence below ${d.review_threshold}`} />
+                  </span>
+                )}
               </span>
               <div className="flex items-baseline gap-3">
                 {d.annotated && (
@@ -393,7 +444,7 @@ function Viewer({ d }: { d: LayoutDetail }) {
                     <span className="ml-1 text-[11px] font-normal text-faint">IoU</span>
                   </span>
                 )}
-                <span className="tabular text-sm" style={{ color: conf != null && conf < 0.5 ? BAD : "var(--color-muted)" }}>
+                <span className="tabular text-sm" style={{ color: flagged ? BAD : "var(--color-muted)" }}>
                   conf {pct(conf)}
                 </span>
               </div>
@@ -406,7 +457,11 @@ function Viewer({ d }: { d: LayoutDetail }) {
                   </>
                 ) : null}
               </span>
-              {conf != null && conf < 0.5 && <span className="text-[11px] text-rose">Low confidence: check by eye</span>}
+              {flagged && (
+                <span className="text-[11px] text-rose">
+                  Confidence below {d.review_threshold}: check this box by eye before trusting its results
+                </span>
+              )}
             </div>
           );
         })}
@@ -500,6 +555,25 @@ function Viewer({ d }: { d: LayoutDetail }) {
               );
             })}
           </svg>
+          {showDet &&
+            BOXES.filter((b) => d.needs_review.includes(b.key)).map((b) => {
+              const det = d.boxes[b.key];
+              if (det[3] <= y0 || det[1] >= y1) return null; // not in this band
+              return (
+                <span
+                  key={b.key}
+                  className="pointer-events-none absolute z-[2] whitespace-nowrap rounded-[3px] px-1.5 py-0.5 text-[11px] font-medium shadow-md"
+                  style={{
+                    left: `${(100 * Math.max(0, det[0])) / W}%`,
+                    top: `${(100 * (Math.max(det[1], y0) - y0)) / Math.max(1, y1 - y0)}%`,
+                    backgroundColor: BAD,
+                    color: "#121419",
+                  }}
+                >
+                  {b.short} · needs review
+                </span>
+              );
+            })}
         </div>
       </div>
 

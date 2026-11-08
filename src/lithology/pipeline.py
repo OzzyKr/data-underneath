@@ -20,7 +20,7 @@ from lithology.config import Config
 from lithology.features import match_descriptor, stroke_descriptor, stroke_distances
 from lithology.io import Document, crop_rgb, image_dpi, open_image
 from lithology.legend import match_distances, read_legend, swatch_colour, swatch_descriptor
-from lithology.models import Box, DocumentBoxes, DocumentResult, Interval
+from lithology.models import Box, DocumentBoxes, DocumentResult, Interval, needs_review
 from lithology.naming import (
     Naming,
     best_guess,
@@ -134,12 +134,22 @@ def _layout_step(doc: Document, img, cfg: Config, boxes: DocumentBoxes | None) -
     from lithology.layout import detect_boxes
 
     lay = detect_boxes(img, cfg.layout)
+    review = needs_review(lay.confidence, cfg.layout.review_threshold)
     info: dict = {
         "source": "detected",
         "boxes": lay.boxes.to_dict(),
         "confidence": lay.confidence,
-        "low_confidence": [k for k, v in lay.confidence.items() if v < 0.5],
+        "review_threshold": cfg.layout.review_threshold,
+        "needs_review": review,  # boxes a human must check before their intervals are trusted
+        "low_confidence": review,  # older name of the same list
     }
+    if review:
+        log.warning(
+            "%s: detected layout box(es) need review (confidence below %s): %s",
+            doc.doc_id,
+            cfg.layout.review_threshold,
+            ", ".join(f"{k} ({lay.confidence[k]:.2f})" for k in review),
+        )
     if ann is not None:
         a, d = ann.boxes.to_dict(), lay.boxes.to_dict()
         info["iou_vs_annotation"] = {k: round(Box.from_seq(d[k]).iou(Box.from_seq(a[k])), 3) for k in a}
@@ -155,8 +165,11 @@ def _process(
 
     with _timed(t, "layout", hook):  # step 1: where are the depth column, lithology column and legend?
         boxes, res.layout = _layout_step(doc, img, cfg, boxes)
-        if res.layout.get("low_confidence"):
-            res.warnings.append(f"layout: low confidence for {res.layout['low_confidence']}")
+        if res.layout.get("needs_review"):
+            res.warnings.append(
+                f"layout: needs review (detected box confidence < {res.layout['review_threshold']}): "
+                + ", ".join(res.layout["needs_review"])
+            )
         res.boxes = boxes
         lc = boxes.lithology_column.clip(*img.size)
 

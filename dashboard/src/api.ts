@@ -231,6 +231,8 @@ export type LayoutRow = {
   seconds: number | null;
   iou: BoxMap<number | null> | null;
   confidence: BoxMap<number | null> | null;
+  /** Boxes whose detected confidence is below layout.review_threshold: a human must check them. */
+  needs_review: BoxKey[];
 };
 export type LayoutUpload = {
   id: string;
@@ -240,12 +242,24 @@ export type LayoutUpload = {
   elapsed: number;
   seconds: number | null;
   confidence: BoxMap<number> | null;
+  needs_review: BoxKey[];
+};
+/** Annotated pages: did the needs-review rule flag the boxes that were wrong (IoU < 0.5)? */
+export type ReviewCounts = {
+  pages: number;
+  flagged_wrong: number;
+  flagged_right: number;
+  unflagged_wrong: number;
+  unflagged_right: number;
 };
 export type LayoutSummary = {
   run: string | null;
   mean_seconds?: number;
   max_seconds?: number;
   metrics: { dev?: { pages: number } & BoxMap<BoxMetric>; holdout?: { pages: number } & BoxMap<BoxMetric> } | null;
+  review_threshold: number;
+  needs_review_pages?: number;
+  review_evidence?: { threshold: number; dev?: ReviewCounts | null; holdout?: ReviewCounts | null } | null;
   pages: LayoutRow[];
   uploads?: LayoutUpload[];
 };
@@ -257,6 +271,7 @@ export type LayoutDetail = LayoutRow & {
   body: [number, number] | null;
   boxes: BoxMap<[number, number, number, number]>;
   annotated: BoxMap<[number, number, number, number]> | null;
+  review_threshold: number;
   notes: string[];
 };
 

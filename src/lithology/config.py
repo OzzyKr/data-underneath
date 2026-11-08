@@ -105,6 +105,7 @@ class AIConfig:
 @dataclass(frozen=True)
 class LayoutConfig:
     source: str
+    review_threshold: float
     body_samples: int
     body_gap_in: float
     header_search_in: float

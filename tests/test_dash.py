@@ -188,3 +188,65 @@ def test_live_run_adds_a_log(client, dash_repo, synth_doc):
     logs = client.get("/api/logs").json()
     live = [g for g in logs if g["source"] == "live"]
     assert [g["doc_id"] for g in live] == ["live_copy"] and live[0]["log_id"] == s["log_id"]
+
+
+# ------------------------------------------------------------------------------------------------ layout page
+
+
+def test_layout_view_returns_needs_review(tmp_path, monkeypatch):
+    """Batch pages get needs_review from the run's column, or from confidence + threshold for older runs; uploads
+    get it from the detector's confidence."""
+    import csv
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    import lithology.layout
+    from lithology.dash.layout import LayoutView
+    from lithology.models import DocumentBoxes
+
+    (tmp_path / "dataset" / "images").mkdir(parents=True)
+    keys = ("depth_column", "interpreted_lithology_column", "lithology_legend")
+
+    def write_run(name: str, rows: list[dict]) -> None:
+        run = tmp_path / "out" / name
+        run.mkdir(parents=True)
+        with open(run / "layout_summary.csv", "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+        (run / "layout_summary.json").write_text(json.dumps({"documents": len(rows), "mean_seconds": 1.0}))
+
+    base = {"vendor": "v", "split": "dev", "seconds": 1.0}
+    old = [
+        {"doc_id": "a", **base, **{f"conf_{k}": c for k, c in zip(keys, (0.3, 0.9, 0.49), strict=True)}},
+        {"doc_id": "b", **base, **{f"conf_{k}": 0.9 for k in keys}},
+    ]
+    write_run("layout_old", old)
+    monkeypatch.setenv("LITH_LAYOUT_DIR", str(tmp_path / "out" / "layout_old"))
+    view = LayoutView(Paths(tmp_path), include_holdout=False)
+    s = view.summary()
+    by = {p["doc_id"]: p for p in s["pages"]}
+    assert by["a"]["needs_review"] == ["depth_column", "lithology_legend"]  # computed: the run has no column
+    assert by["b"]["needs_review"] == []
+    assert s["needs_review_pages"] == 1 and s["review_threshold"] == 0.5
+
+    write_run("layout_new", [{**old[0], "needs_review": "lithology_legend"}])  # the run's own column wins
+    monkeypatch.setenv("LITH_LAYOUT_DIR", str(tmp_path / "out" / "layout_new"))
+    assert LayoutView(Paths(tmp_path), include_holdout=False).summary()["pages"][0]["needs_review"] == [
+        "lithology_legend"
+    ]
+
+    box = [0, 0, 10, 10]
+    conf = {"depth_column": 0.9, "interpreted_lithology_column": 0.2, "lithology_legend": 0.7}
+    fake = SimpleNamespace(boxes=DocumentBoxes.from_dict(dict.fromkeys(keys, box)), confidence=conf, diagnostics={})
+    monkeypatch.setattr(lithology.layout, "detect_boxes", lambda img, cfg: fake)
+    up = tmp_path / "up.png"
+    Image.new("RGB", (40, 40), "white").save(up)
+    job = {"id": "upload-x", "name": "up.png", "path": up, "state": "queued", "t0": time.time(), "error": None}
+    view.jobs[job["id"]] = job
+    view._detect(job)
+    assert job["state"] == "done", job["error"]
+    assert view.job("upload-x")["needs_review"] == ["interpreted_lithology_column"]
+    assert view.detail("upload-x")["needs_review"] == ["interpreted_lithology_column"]
+    view.shutdown()

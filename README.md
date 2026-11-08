@@ -82,6 +82,14 @@ runs. Front-end development: `lith dash --dev` (API with reload) plus `cd dashbo
 
 Every threshold lives in `config/default.yaml`, in feet or as a fraction of a box, never raw pixels.
 
+**Needs review (detected boxes).** When the boxes come from the layout detector (no annotation file, or
+`--detect-boxes`), any box whose confidence is below `layout.review_threshold` (0.5) is flagged for a person to
+check, not silently trusted: every box at or above 0.5 was right on dev and holdout, and some below it were wrong.
+The flag is a WARNING in the log and in the `warnings` column of `run_summary.csv`, a `needs_review` list in
+`diagnostics/<doc>_layout.json` and `run_meta.json`, a `needs_review` column in `lith layout`'s
+`layout_summary.csv` (with flagged-vs-wrong counts in `layout_summary.json`), and a badge on the dashboard's Layout
+page. Runs that use the annotation boxes are never flagged.
+
 ## Engineering rules
 
 - Same input + same config = same output. No network calls in the default run.
