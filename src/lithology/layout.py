@@ -424,12 +424,17 @@ def depth_candidates(
             else:
                 continue
         xl, xr = float((c[:, 0] - c[:, 3]).min()), float((c[:, 0] + c[:, 3]).max())  # label extents, not centres
+        # tick marks on the scale's rule are read into the labels: accept a rule up to ~0.03 in inside the left
+        # label extent (but never past the label centres)
+        tuck = int(0.03 * dpi)
+        cl = float(np.percentile(c[:, 0], 10))
         lo = int(max(0, xl - reach))
-        left = np.where(dark[lo : int(xl)] > 0.6)[0]
+        left = np.where(dark[lo : int(min(xl + tuck, cl))] > 0.6)[0]
         x0 = lo + int(left.max()) + 1 if len(left) else int(max(0, xl - 0.1 * dpi))
         hi = int(min(W, xr + reach))
-        right = np.where(dark[int(xr) + 1 : hi] > 0.6)[0]
-        x1 = int(xr) + 1 + int(right.min()) if len(right) else int(min(W, xr + 0.1 * dpi))
+        start = int(xr) + 1  # (right side: no tuck; label ends there are the digits themselves)
+        right = np.where(dark[start:hi] > 0.6)[0]
+        x1 = start + int(right.min()) if len(right) else int(min(W, xr + 0.1 * dpi))
         if x1 - x0 < min_w:
             pad = int((min_w - (x1 - x0)) / 2) + 1
             x0, x1 = max(0, x0 - pad), min(W, x1 + pad)
