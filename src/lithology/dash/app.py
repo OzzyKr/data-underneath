@@ -317,6 +317,10 @@ def create_app(paths: Paths | None = None) -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa(full_path: str) -> FileResponse:
+            if full_path == "api" or full_path.startswith("api/"):  # never answer a data request with the page
+                raise HTTPException(
+                    404, f"/{full_path} does not exist on this server: restart the dashboard if the page is newer"
+                )
             f = paths.dist / full_path
             if full_path and f.is_file() and paths.dist in f.resolve().parents:
                 return FileResponse(f)

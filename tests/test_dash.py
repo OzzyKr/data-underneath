@@ -214,3 +214,18 @@ def test_live_run_without_box_file_uses_the_layout_detector(client, dash_repo, s
     assert s["state"] == "done", s
     assert s["boxes"]["source"] == "detector"
     assert s["boxes"]["iou_vs_json"]["interpreted_lithology_column"] > 0.9
+
+
+def test_unknown_api_route_is_a_404_not_the_page(dash_repo):
+    """The page's catch-all must not answer data requests: an older server would otherwise send HTML to a newer page."""
+    from fastapi.testclient import TestClient
+
+    from lithology.dash.app import create_app
+
+    dist = dash_repo / "dashboard" / "dist"
+    (dist / "assets").mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text("<!doctype html><title>page</title>")
+    with TestClient(create_app(Paths(dash_repo))) as c:
+        assert c.get("/csv/some-log").text.startswith("<!doctype html>")  # page routes still get the page
+        r = c.get("/api/not-a-route")
+        assert r.status_code == 404 and "restart the dashboard" in r.json()["detail"]

@@ -178,7 +178,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(detail);
   }
-  return r.json() as Promise<T>;
+  try {
+    return (await r.json()) as T;
+  } catch {
+    // e.g. a dashboard server started before the page was rebuilt answers a new endpoint with the page itself
+    throw new Error(`${url} did not return data. Restart the dashboard (Ctrl+C, then make dash) and reload.`);
+  }
 }
 
 const post = <T,>(url: string, body: unknown) =>
