@@ -22,6 +22,7 @@ Every box comes with a confidence. Diagnostics list the runner-up candidates.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from dataclasses import dataclass, field
@@ -679,18 +680,61 @@ def header_words(img: Image.Image, top: int, dpi: float, cfg: LayoutConfig) -> t
     return words, s
 
 
+def _rule_rows(prof: np.ndarray, frac: float, gap: int = 3) -> list[int]:
+    """Centres of runs of rows (or columns) whose rule coverage is >= frac."""
+    out: list[list[int]] = []
+    for y in np.where(prof >= frac)[0]:
+        if out and y - out[-1][-1] <= gap:
+            out[-1].append(int(y))
+        else:
+            out.append([int(y)])
+    return [int(np.mean(r)) for r in out]
+
+
+def _split_cell(c: tuple, hl: np.ndarray, vl: np.ndarray, s: float, min_side: float, frac: float = 0.9) -> list[tuple]:
+    """Sub-cells between internal rules that cross (almost) the whole cell, joining up to 3 neighbours: a legend is
+    often one compartment of a bigger frame whose inner divider does not close a rectangle of its own."""
+    x0, y0, x1, y1 = (int(round(v * s)) for v in c)
+    x1, y1 = min(x1, hl.shape[1]), min(y1, hl.shape[0])
+    if x1 - x0 < 2 * min_side or y1 - y0 < min_side:
+        return []
+    pad = 4
+    ys = [y0] + [y0 + pad + y for y in _rule_rows(hl[y0 + pad : y1 - pad, x0:x1].mean(axis=1), frac)] + [y1]
+    xs = [x0] + [x0 + pad + x for x in _rule_rows(vl[y0:y1, x0 + pad : x1 - pad].mean(axis=0), frac)] + [x1]
+    out = []
+    for i in range(len(ys)):
+        for j in range(i + 1, min(len(ys), i + 4)):
+            for a in range(len(xs)):
+                for b in range(a + 1, min(len(xs), a + 4)):
+                    if (i, j, a, b) == (0, len(ys) - 1, 0, len(xs) - 1):
+                        continue
+                    if ys[j] - ys[i] >= min_side and xs[b] - xs[a] >= 2 * min_side:
+                        out.append((int(xs[a] / s), int(ys[i] / s), int(xs[b] / s), int(ys[j] / s)))
+    return out
+
+
 def header_cells(img: Image.Image, top: int, dpi: float, cfg: LayoutConfig) -> list[tuple[int, int, int, int]]:
-    """Closed rule rectangles in the header plus full-width bands between horizontal rules."""
+    """Closed rule rectangles in the header, full-width bands between horizontal rules (also cropped to the outermost
+    vertical rules crossing them), and the sub-cells of all of these between internal rules."""
     W = img.size[0]
     hh = int(min(top, cfg.header_max_in * dpi))
     if hh < 20:
         return []
     s = min(1.0, 2000.0 / W)
     g = _ink(crop_rgb(img, Box(0, 0, W, hh), scale=s))
-    ink = (g < 160).astype(np.uint8)
     L = max(15, int(0.35 * dpi * s))
-    hl = cv2.morphologyEx(ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (L, 1)))
-    vl = cv2.morphologyEx(ink, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, L)))
+    kh, kv = cv2.getStructuringElement(cv2.MORPH_RECT, (L, 1)), cv2.getStructuringElement(cv2.MORPH_RECT, (1, L))
+
+    def lines(ink: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        return cv2.morphologyEx(ink, cv2.MORPH_OPEN, kh), cv2.morphologyEx(ink, cv2.MORPH_OPEN, kv)
+
+    hl, vl = lines((g < 160).astype(np.uint8))
+    # hairline rules in light grey (PDF exports draw frames at ~200/255): keep them only where they are thin, so a
+    # grey fill or a grey swatch is never read as a rule
+    hl2, vl2 = lines((g < 230).astype(np.uint8))
+    t = max(3, int(round(0.03 * dpi * s)))
+    hl |= hl2 & ~cv2.morphologyEx(hl2, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, t)))
+    vl |= vl2 & ~cv2.morphologyEx(vl2, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (t, 1)))
     grid = cv2.dilate(hl | vl, np.ones((3, 3), np.uint8))
     cnts, _ = cv2.findContours(grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     cells, min_side = [], 0.4 * dpi * s
@@ -700,15 +744,25 @@ def header_cells(img: Image.Image, top: int, dpi: float, cfg: LayoutConfig) -> l
             continue
         cells.append((int(x / s), int(y / s), int((x + w) / s), int((y + h) / s)))
     rowfrac = hl.mean(axis=1)
-    lines: list[int] = []
+    lines_y: list[int] = []
     for y in np.where(rowfrac > 0.6)[0]:
-        if not lines or y - lines[-1] > 3:
-            lines.append(int(y))
-    for i in range(len(lines)):
-        for j in range(i + 1, min(len(lines), i + 4)):
-            if lines[j] - lines[i] >= min_side:
-                cells.append((0, int(lines[i] / s), W, int(lines[j] / s)))
-    return cells
+        if not lines_y or y - lines_y[-1] > 3:
+            lines_y.append(int(y))
+    bands = []
+    for i in range(len(lines_y)):
+        for j in range(i + 1, min(len(lines_y), i + 4)):
+            if lines_y[j] - lines_y[i] >= min_side:
+                bands.append((0, int(lines_y[i] / s), W, int(lines_y[j] / s)))
+    # a band also spans the page margins: crop it to the outermost vertical rules that cross it
+    tight = []
+    for b in bands:
+        y0, y1 = int(b[1] * s) + 4, int(b[3] * s) - 4
+        xs = _rule_rows(vl[y0:y1].mean(axis=0), 0.9) if y1 > y0 else []
+        if len(xs) >= 2 and xs[-1] - xs[0] > 0.3 * vl.shape[1]:
+            tight.append((int(xs[0] / s), b[1], int(xs[-1] / s), b[3]))
+    base = list(dict.fromkeys(cells + bands))
+    subs = [sc for c in base + tight for sc in _split_cell(c, hl, vl, s, min_side)]
+    return list(dict.fromkeys(base + tight + subs))
 
 
 def _word_cluster(words: list, dpi: float) -> tuple[int, int, int, int] | None:
@@ -744,20 +798,34 @@ def _snap_cluster(wc: tuple, words: list, cells: list) -> tuple | None:
     return best[1] if best else None
 
 
+@functools.lru_cache(maxsize=4096)
+def _word_kind(t: str) -> str:
+    """rock name / lithology modifier / header metadata / other. Metadata wins: "State" (read as slate) or a
+    "Cement" field label is not a legend entry."""
+    if _META.search(t):
+        return "meta"
+    words = [correct_word(w).lower() for w in re.findall(r"[A-Za-z]{2,}", t)]
+    if any(w in ROCK_WORDS and w not in MODIFIER_WORDS for w in words):
+        return "rock"
+    if any(w in MODIFIER_WORDS or w in ROCK_WORDS for w in words):
+        return "mod"
+    return "other"
+
+
 def legend_score(box: tuple, words: list, page_w: int, header_h: int, cfg: LayoutConfig) -> tuple[float, dict]:
     x0, y0, x1, y1 = box
-    n_all = sum(_is_rock_word(w[4]) for w in words) or 1
-    n_in = n_rock = n_non = 0
-    title = 0.0
-    for wx0, wy0, wx1, wy1, t in words:
+    kinds = [_word_kind(w[4]) for w in words]
+    n_all = sum(k == "rock" for k in kinds) or 1
+    n_in = n_rock = n_mod = n_non = 0
+    title, t_above = 0.0, None
+    for (wx0, wy0, wx1, wy1, t), k in zip(words, kinds, strict=True):
         cx, cy = (wx0 + wx1) / 2, (wy0 + wy1) / 2
         if not (x0 <= cx <= x1 and y0 <= cy <= y1):
             continue
         n_in += 1
-        rock = _is_rock_word(t)
-        n_rock += rock
-        if not rock and _META.search(t):  # only header metadata counts against a legend candidate
-            n_non += 1
+        n_rock += k == "rock"
+        n_mod += k == "mod"
+        n_non += k == "meta"  # only header metadata counts against a legend candidate
         if _TITLE.search(t) and cy < y0 + 0.35 * (y1 - y0):
             title = 1.0
     # a title printed just above the frame ("Lithology Legend" over a centred legend box) also belongs to it
@@ -766,13 +834,16 @@ def legend_score(box: tuple, words: list, page_w: int, header_h: int, cfg: Layou
             cx, cy = (wx0 + wx1) / 2, (wy0 + wy1) / 2
             h = max(1.0, wy1 - wy0)
             if _TITLE.search(t) and x0 <= cx <= x1 and y0 - 3.0 * h <= cy < y0:
-                title = 1.0
+                title, t_above = 1.0, (wy0, h)
                 break
     area = (x1 - x0) * (y1 - y0) / float(max(1, page_w * header_h))
     f = {
         "n_rock": n_rock,
+        "n_mod": n_mod,
         "share": n_rock / n_all,
-        "purity": n_rock / max(1, n_in),
+        # modifiers ("Dolomitic", "Silty", "Pyrite") are legend vocabulary too: a mineral/modifier panel next to the
+        # rock panel is part of the legend, a fossil or drilling-symbol panel is not
+        "purity": (n_rock + n_mod) / max(1, n_in),
         "non": n_non / max(1, n_in),
         "title": title,
         "area": area,
@@ -785,7 +856,51 @@ def legend_score(box: tuple, words: list, page_w: int, header_h: int, cfg: Layou
         - 0.8 * f["non"]
         - 0.4 * area
     )
+    if t_above is not None:
+        f["title_above_y"], f["title_h"] = t_above
     return score, f
+
+
+def _rerank_legend(scored: list, dpi: float) -> list:
+    """Two ordering rules on top of the score (scored is sorted best first):
+    - a candidate nested in the winner, at most half its area, with twice its vocabulary purity and all but at most
+      one of its rock words wins: one stray rock word (a "Cement:" field label) must not buy a frame twice the size;
+    - when the winner's title sits just above it, the candidate with the same frame that starts just above the title
+      wins: the title row belongs to the legend."""
+    if not scored:
+        return scored
+    s0, f0, c0 = scored[0]
+    a0 = (c0[2] - c0[0]) * (c0[3] - c0[1])
+    tol = 4
+    best = None
+    for t in scored[1:]:
+        _, f, c = t
+        inside = c0[0] - tol <= c[0] and c0[1] - tol <= c[1] and c[2] <= c0[2] + tol and c[3] <= c0[3] + tol
+        if (
+            inside
+            and (c[2] - c[0]) * (c[3] - c[1]) <= 0.5 * a0
+            and f["n_rock"] >= max(2, f0["n_rock"] - 1)
+            and f["purity"] >= 2 * f0["purity"]
+        ):
+            best = t
+            break  # scored is sorted: the first hit is the best-scoring one
+    if best is not None:
+        scored = [best] + [t for t in scored if t is not best]
+    s0, f0, c0 = scored[0]
+    if "title_above_y" in f0:
+        ty, th, xt = f0["title_above_y"], f0["title_h"], 0.1 * dpi
+        ext = [
+            t
+            for t in scored
+            if abs(t[2][0] - c0[0]) <= xt
+            and abs(t[2][2] - c0[2]) <= xt
+            and abs(t[2][3] - c0[3]) <= xt
+            and ty - 2.5 * th <= t[2][1] <= ty
+        ]
+        if ext:
+            e = max(ext, key=lambda t: t[2][1])
+            scored = [e] + [t for t in scored if t is not e]
+    return scored
 
 
 def legend_palette(img: Image.Image, box: tuple, n_max: int = 12) -> np.ndarray:
@@ -1011,6 +1126,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     cands = header_cells(img, top, dpi, cfg)
     wc = _word_cluster(words, dpi)
     unsnapped = None
+    cands = list(dict.fromkeys(map(tuple, cands)))
     if wc:
         snapped = _snap_cluster(wc, words, cands)
         if snapped:
@@ -1026,6 +1142,7 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
             f["unsnapped"] = 1.0
         scored.append((sc, f, c))
     scored.sort(key=lambda t: -t[0])
+    scored = _rerank_legend(scored, dpi)
     diag["legend"] = [
         {"box": list(c), "score": round(sc, 3), **{k: round(v, 3) for k, v in f.items()}} for sc, f, c in scored[:3]
     ]
