@@ -76,6 +76,26 @@ def _ink(a: np.ndarray) -> np.ndarray:
     return a if a.ndim == 2 else a.max(axis=2)
 
 
+def _noise_sigma(img: Image.Image, n: int = 40) -> float:
+    """Pixel noise of the page (grey levels): robust spread of horizontal differences between paper-white pixels.
+    Clean renders and bilevel scans give 0."""
+    W, H = img.size
+    ys = np.linspace(0, H - 1, min(n, H)).astype(int)
+    g = np.stack([np.asarray(img.crop((0, int(y), W, int(y) + 1)).convert("L"))[0] for y in ys]).astype(np.int16)
+    paper = (g[:, 1:] > 190) & (g[:, :-1] > 190)
+    if paper.sum() < 1000:
+        return 0.0
+    v = (g[:, 1:] - g[:, :-1])[paper]
+    return float(1.4826 * np.median(np.abs(v - np.median(v))) / np.sqrt(2))
+
+
+def _median_x(a: np.ndarray, k: int = 5) -> np.ndarray:
+    """Median over k pixels along x of independent sampled rows (no mixing between rows)."""
+    r = k // 2
+    pad = np.pad(a, [(0, 0), (r, r)] + [(0, 0)] * (a.ndim - 2), mode="edge")
+    return np.median(np.stack([pad[:, i : i + a.shape[1]] for i in range(k)]), axis=0).astype(a.dtype)
+
+
 def _rows(img: Image.Image, ys: np.ndarray, x0: int = 0, x1: int | None = None) -> np.ndarray:
     W = img.size[0]
     x1 = W if x1 is None else x1
@@ -903,10 +923,14 @@ def _rerank_legend(scored: list, dpi: float) -> list:
     return scored
 
 
-def legend_palette(img: Image.Image, box: tuple, n_max: int = 12) -> np.ndarray:
-    """Distinct saturated fill colours inside the legend (Lab), used to verify the lithology column."""
+def legend_palette(img: Image.Image, box: tuple, n_max: int = 12, noisy: bool = False) -> np.ndarray:
+    """Distinct saturated fill colours inside the legend (Lab), used to verify the lithology column. On a noisy scan
+    the crop is median-filtered first."""
     x0, y0, x1, y1 = box
-    arr = crop_rgb(img, Box(x0, y0, x1, y1), scale=min(1.0, 800.0 / max(1, x1 - x0))).reshape(-1, 3).astype(np.int16)
+    arr = crop_rgb(img, Box(x0, y0, x1, y1), scale=min(1.0, 800.0 / max(1, x1 - x0)))
+    if noisy and min(arr.shape[:2]) >= 5:
+        arr = cv2.medianBlur(arr, 5)
+    arr = arr.reshape(-1, 3).astype(np.int16)
     sat = arr[(arr.max(axis=1) - arr.min(axis=1)) > 40]
     if len(sat) < 50:
         return np.zeros((0, 3), np.float32)
@@ -1067,6 +1091,13 @@ def _dedupe_tracks(cands: list[dict], thr: float = 0.85) -> list[dict]:
     return kept
 
 
+def _bilevel(rows_rgb: np.ndarray) -> bool:
+    """True when the ink is black on white (a B/W scan or render): few mid-grey pixels among the non-white ones."""
+    g = _gray(rows_rgb[::2, ::2])
+    nonwhite = g < 230
+    return bool(((g >= 60) & nonwhite).sum() < 0.3 * max(1, nonwhite.sum()))
+
+
 def _page_is_grey(rows_rgb: np.ndarray) -> bool:
     """True when the page carries (almost) no colour: a scan or a greyscale render."""
     s = rows_rgb[::4, ::4].astype(np.int16)
@@ -1091,10 +1122,12 @@ def _rank_sum(cands: list[dict], cues: dict[str, float]) -> None:
 def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     W, H = img.size
     dpi = image_dpi(img) or W / 8.5
+    sigma = _noise_sigma(img)
+    noisy = sigma > 3.0  # a noisy scan: colour cues are read on median-filtered pixels
     top, bot, _ = body_range(img, dpi, cfg)
     rows = _straight(_rows(img, np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top), 500).astype(int)))
     edges, dark, rules = vertical_edges(rows, dpi)
-    diag: dict = {"dpi": dpi, "body": [top, bot], "n_edges": len(edges)}
+    diag: dict = {"dpi": dpi, "body": [top, bot], "n_edges": len(edges), "noise": round(sigma, 1)}
 
     # depth
     toks, rots = number_tokens(img, top, bot, dpi, cfg)
@@ -1158,14 +1191,18 @@ def detect_boxes(img: Image.Image, cfg: LayoutConfig) -> LayoutResult:
     anchors = lith_anchors(img, top, dpi, words)
     neg_anchors = getattr(lith_anchors, "negative", [])
     diag["neg_anchors"] = [[round(x), round(wd)] for x, wd in neg_anchors]
-    diag["anchors"] = [[round(x), round(wd), int(st)] for x, wd, st in anchors]  # wd < 0: a whole track cell
-    palette = legend_palette(img, legend) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
-    bw_page = img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))
+    diag["anchors"] = [[round(x), round(wd), int(st)] for x, wd, st in anchors]
+    palette = legend_palette(img, legend, noisy=noisy) if img.mode not in ("1", "L") else np.zeros((0, 3), np.float32)
+    # hatch-texture path only for bilevel pages (black ink on white); a colour log converted to grey keeps its solid
+    # mid-grey fills, and the colour cues work on those grey levels
+    bw_page = (img.mode in ("1", "L") or (not len(palette) and _page_is_grey(rows))) and _bilevel(rows)
     lrows = rows
     if bw_page:  # hatching skips rows: measure texture on thin bands (darkest pixel over ~0.03 in of rows)
         band = max(2, int(0.03 * dpi))
         ys = np.linspace(top + 0.05 * (bot - top), bot - 0.02 * (bot - top) - band, 300).astype(int)
         lrows = _straight(np.stack([_rows(img, np.arange(y, y + band)).min(axis=0) for y in ys]))
+    if noisy and not bw_page:  # colour cues on denoised rows (rules are found on the raw rows)
+        lrows = _median_x(lrows)
     lcs = lith_candidates(lrows, edges, dark, dpi, cfg, palette, anchors, rules, neg_anchors)
     if dcs:  # never let the depth labels sit inside a lithology candidate (touching its edge is fine)
         lxc = sum(dcs[0]["labels"]) / 2
